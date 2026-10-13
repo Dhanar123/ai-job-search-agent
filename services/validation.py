@@ -30,8 +30,8 @@ from services.matching import AIEligibility, MatchResult
 
 logger = logging.getLogger(__name__)
 
-# Request timeout for status verification probes
-_PROBE_TIMEOUT = 10.0
+# Request timeout for status verification probes (kept short to avoid blocking the UI)
+_PROBE_TIMEOUT = 4.0
 
 # User agent for provider and web requests
 _USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) JobSearchAgent/1.0 (Status Validator)"
@@ -419,8 +419,16 @@ async def verify_listing_status(
             return await verify_ashby_status(board, job_id, client)
 
     # 4. RSS or Generic providers without supported status API
-    # Strictly enforce: never claim open merely because URL responds
-    return await probe_generic_url_status(url, client)
+    # Skip live HTTP probe entirely — a generic probe can NEVER confirm a listing
+    # as OPEN (HTTP 200 is not reliable vacancy evidence) and a full network round-trip
+    # for every generic URL causes severe latency on cloud deployments.
+    # Record as UNVERIFIED immediately and let the user decide.
+    return (
+        ListingStatus.UNVERIFIED,
+        "none",
+        "Provider does not support a vacancy-status API; listing recorded as unverified "
+        "(URL responsiveness cannot guarantee active vacancy)",
+    )
 
 
 # ── Deduplication Engine ────────────────────────────────────────────
