@@ -123,9 +123,6 @@ async def run_alumni_pipeline(
                         # Deduplicate by URL
                         if not any(existing.url == r.url for existing in aggregated_search_results):
                             aggregated_search_results.append(r)
-                    # If we found sufficient results, we can continue or query alternative
-                    if len(aggregated_search_results) >= 10:
-                        break
                 except Exception as exc:
                     logger.error(
                         "Search API failed for company '%s', query '%s': %s",
@@ -135,8 +132,8 @@ async def run_alumni_pipeline(
                     )
                     company_search_failed = True
                     search_error_msg = str(exc)
-                    # Do not crash the entire pipeline; continue or record failure
-                    break
+                    # Continue with remaining queries instead of aborting
+                    continue
 
             if company_search_failed and not aggregated_search_results:
                 results.append(

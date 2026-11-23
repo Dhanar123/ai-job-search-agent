@@ -30,25 +30,23 @@ _PAST_EMPLOYMENT_PATTERNS = [
     re.compile(r"\bformer\b", re.IGNORECASE),
     re.compile(r"\bex[- ]", re.IGNORECASE),
     re.compile(r"\bpreviously\b", re.IGNORECASE),
-    re.compile(r"\bworked at\b", re.IGNORECASE),
     re.compile(r"\bwas a\b", re.IGNORECASE),
     re.compile(r"\bserving as former\b", re.IGNORECASE),
-    re.compile(r"\bended\b", re.IGNORECASE),
 ]
 
 # Year range ending in a past year (e.g. "2018 - 2022") without "present"
 _PAST_YEAR_RANGE_PATTERN = re.compile(
-    r"\b(20[0-2][0-9])\s*[-–to]+\s*(20[0-2][0-5])\b", re.IGNORECASE
+    r"\b(20[0-2][0-9])\s*[-\u2013to]+\s*(20[0-2][0-5])\b", re.IGNORECASE
 )
 
 
-def _is_valid_https_url(url: str | None) -> bool:
-    """Check if URL string is a well-formed HTTPS URL."""
+def _is_valid_url(url: str | None) -> bool:
+    """Check if URL string is a well-formed HTTP or HTTPS URL."""
     if not url or not isinstance(url, str):
         return False
     try:
         parsed = urlparse(url.strip())
-        return parsed.scheme.lower() == "https" and bool(parsed.netloc) and "." in parsed.netloc
+        return parsed.scheme.lower() in ("http", "https") and bool(parsed.netloc) and "." in parsed.netloc
     except Exception:
         return False
 
@@ -71,7 +69,7 @@ def _matches_college(
         else:
             if var_lower in combined_text:
                 return True
-            if fuzz.partial_ratio(var_lower, combined_text) >= 85:
+            if fuzz.partial_ratio(var_lower, combined_text) >= 80:
                 return True
     return False
 
@@ -95,7 +93,7 @@ def _matches_company(
             return True
         if target_clean in combined:
             return True
-        if fuzz.partial_ratio(target_clean, combined) >= 85:
+        if fuzz.partial_ratio(target_clean, combined) >= 80:
             return True
     return False
 
@@ -120,7 +118,7 @@ def verify_alumni_candidate(
     reject_reasons: list[str] = []
 
     # 1. Structure check for Education Evidence
-    edu_valid_url = _is_valid_https_url(candidate.education_source_url)
+    edu_valid_url = _is_valid_url(candidate.education_source_url)
     edu_has_quote = bool(candidate.education_quote and candidate.education_quote.strip())
     edu_inst = str(candidate.education.get("institution", "") or "").strip()
 
@@ -133,7 +131,7 @@ def verify_alumni_candidate(
             reject_reasons.append(RejectReason.EDUCATION_UNSUPPORTED.value)
 
     # 2. Structure check for Employment Evidence
-    emp_valid_url = _is_valid_https_url(candidate.employment_source_url)
+    emp_valid_url = _is_valid_url(candidate.employment_source_url)
     emp_has_quote = bool(candidate.employment_quote and candidate.employment_quote.strip())
     employer = (candidate.current_employer or "").strip()
 
@@ -153,21 +151,34 @@ def verify_alumni_candidate(
         elif not _matches_company(employer, quote, company_group):
             reject_reasons.append(RejectReason.EMPLOYMENT_NOT_CURRENT.value)
 
-    # 3. Name-collision guard
-    # If education and employment come from different URLs, ensure candidate name appears consistently
+    # 3. Name-collision guard (relaxed)
+    # Only flag collision if education and employment come from different domains
+    # AND the candidate name is not found in either quote.
+    # When both evidences come from the same URL (e.g. same LinkedIn profile), skip this check.
     if edu_valid_url and emp_valid_url:
         u_edu = str(candidate.education_source_url).strip()
         u_emp = str(candidate.employment_source_url).strip()
         if u_edu != u_emp:
-            # Check if name is mentioned in quotes
-            name_tokens = [t.lower() for t in candidate.full_name.split() if len(t) > 2]
-            edu_q = (candidate.education_quote or "").lower()
-            emp_q = (candidate.employment_quote or "").lower()
-            edu_name_match = any(t in edu_q for t in name_tokens) or (candidate.profile_url and str(candidate.profile_url) == u_edu)
-            emp_name_match = any(t in emp_q for t in name_tokens) or (candidate.profile_url and str(candidate.profile_url) == u_emp)
+            # Check domains — if same domain (e.g. both linkedin.com), relax the guard
+            try:
+                edu_domain = urlparse(u_edu).netloc.lower()
+                emp_domain = urlparse(u_emp).netloc.lower()
+            except Exception:
+                edu_domain = ""
+                emp_domain = ""
 
-            if not (edu_name_match and emp_name_match):
-                reject_reasons.append(RejectReason.NAME_COLLISION_SUSPECTED.value)
+            same_domain = edu_domain and emp_domain and edu_domain == emp_domain
+
+            if not same_domain:
+                # Check if name appears in at least one quote
+                name_tokens = [t.lower() for t in candidate.full_name.split() if len(t) > 2]
+                edu_q = (candidate.education_quote or "").lower()
+                emp_q = (candidate.employment_quote or "").lower()
+                any_name_in_edu = any(t in edu_q for t in name_tokens)
+                any_name_in_emp = any(t in emp_q for t in name_tokens)
+
+                if not (any_name_in_edu or any_name_in_emp):
+                    reject_reasons.append(RejectReason.NAME_COLLISION_SUSPECTED.value)
 
     # 4. Construct Evidence Items if valid
     edu_item: EvidenceItem | None = None
@@ -207,7 +218,7 @@ def verify_alumni_candidate(
 
     # Clean profile URL
     profile_http_url: HttpUrl | None = None
-    if candidate.profile_url and _is_valid_https_url(candidate.profile_url):
+    if candidate.profile_url and _is_valid_url(candidate.profile_url):
         try:
             profile_http_url = HttpUrl(candidate.profile_url.strip())
         except Exception:
