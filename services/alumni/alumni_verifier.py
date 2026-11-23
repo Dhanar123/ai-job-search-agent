@@ -135,7 +135,7 @@ def verify_alumni_candidate(
     # 2. Structure check for Employment Evidence
     emp_valid_url = _is_valid_https_url(candidate.employment_source_url)
     emp_has_quote = bool(candidate.employment_quote and candidate.employment_quote.strip())
-    employer = candidate.current_employer.strip()
+    employer = (candidate.current_employer or "").strip()
 
     if not emp_has_quote or not emp_valid_url:
         if RejectReason.NO_EVIDENCE.value not in reject_reasons:
@@ -228,7 +228,7 @@ def verify_alumni_candidate(
     return AlumniCandidate(
         full_name=candidate.full_name,
         education=edu_record,
-        current_employer=candidate.current_employer,
+        current_employer=candidate.current_employer or None,
         designation=candidate.designation,
         profile_url=profile_http_url,
         evidence=evidence_list,

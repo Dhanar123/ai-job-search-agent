@@ -95,7 +95,7 @@ def select_verified_alumni(
         if profile_key:
             identity_key = f"url::{profile_key}"
         else:
-            norm_emp = normalize_company_name(c.current_employer)
+            norm_emp = normalize_company_name(c.current_employer or "")
             identity_key = f"name::{norm_name}::emp::{norm_emp}"
 
         if identity_key in seen_identities:
