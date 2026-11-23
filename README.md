@@ -47,6 +47,29 @@ An autonomous, end-to-end job search and matching application built with Python 
    - Direct clickable **"Apply on [Company] ↗"** link opening the original posting in a new browser tab.
    - Zero automated application submissions.
 
+8. **Verified Alumni Finder (Step 10)**:
+   - For every company discovered in active job postings, discovers verified alumni of the target institution (default: Government College of Technology / GCT).
+   - Multi-stage pipeline: company extraction -> text normalization -> conservative fuzzy deduplication -> targeted query generation -> search API client -> LLM candidate extraction -> dual independent evidence verification (education + current employment) -> Pydantic validation -> selection of all verified alumni.
+   - Non-negotiable evidence rule: requires verifiable public quotes and source URLs for both college affiliation and current employer.
+   - Preserves all verified candidates; never drops verified candidates due to ranking.
+
+---
+
+## 🎓 Verified Alumni Finder & Limits
+
+The Verified Alumni Finder searches public web directories (such as public LinkedIn profiles and official university/company pages) via search APIs (Serper, Brave, or Tavily).
+
+### Verification Rules
+- **Education Evidence**: The candidate name and college (or accepted alias) must appear in the source text.
+- **Current Employment Evidence**: The candidate must be explicitly evidenced as currently working at the company. Past, former, ex-, or end-dated roles are rejected.
+- **Name-Collision Guard**: Prevents attributing education and employment from unrelated people sharing the same name.
+- **Strict Validation**: Candidates must have verifiable quotes and URLs for both claims before receiving the verified badge.
+
+### Compliance & Limits
+- **Public Data Only**: Operates strictly on search engine snippets and public pages. Does not bypass login walls, scrape authenticated sessions, or violate third-party terms of service.
+- **Rate & Quota Limits**: API calls are capped per run (`ALUMNI_MAX_API_CALLS`) with bounded concurrency and exponential backoff to respect search provider quotas.
+- **Uncertainty Preservation**: If a candidate only has education evidence but not current employment (or vice versa), they are categorized as rejected / unverified and omitted from the alumni list.
+
 ---
 
 ## 🚀 Quick Start

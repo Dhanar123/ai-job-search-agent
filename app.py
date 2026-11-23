@@ -54,6 +54,7 @@ from services.validation import (
     get_job_url,
     validate_and_rank_results,
 )
+from ui.alumni_tab import render_alumni_tab
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,8 @@ def init_session_state() -> None:
         st.session_state.pipeline_stats = {}
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = 0
+    if "alumni_report" not in st.session_state:
+        st.session_state.alumni_report = None
 
 
 init_session_state()
@@ -437,9 +440,11 @@ st.caption(
     "strict URL verification, and evidence-based AI qualification evaluation."
 )
 
-# ── Navigation Tabs (Tab 1: Search Criteria, Tab 2: Matching Jobs) ───
+# ── Navigation Tabs (Tab 1: Search Criteria, Tab 2: Matching Jobs, Tab 3: GCT Alumni) ───
 
-tab_criteria, tab_results = st.tabs(["⚙️ Search Criteria & Filters", "🎯 Matching Jobs & Rankings"])
+tab_criteria, tab_results, tab_alumni = st.tabs(
+    ["⚙️ Search Criteria & Filters", "🎯 Matching Jobs & Rankings", "🎓 GCT Alumni"]
+)
 
 
 # ═════════════════════════════════════════════════════════════════════
@@ -848,3 +853,11 @@ with tab_results:
             with st.expander("⚠️ Provider Diagnostic Warnings", expanded=False):
                 for err in st.session_state.scan_errors:
                     st.warning(f"**Provider {err.get('provider')} [{err.get('identifier')}]:** {err.get('error')}")
+
+# ═════════════════════════════════════════════════════════════════════
+# TAB 3: 🎓 GCT Alumni Directory
+# ═════════════════════════════════════════════════════════════════════
+
+with tab_alumni:
+    render_alumni_tab(st.session_state.validation_report)
+

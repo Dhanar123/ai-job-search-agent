@@ -21,6 +21,10 @@ Streamlit Community Cloud manages environment variables and sensitive keys throu
 | `GROQ_API_KEY` | **Yes** | *None* | Your Groq API key (starts with `gsk_...`) |
 | `GROQ_MODEL` | No | `qwen/qwen3.8-27b` | High-limit LLM model used for resume extraction and qualification evaluation |
 | `GROQ_BASE_URL` | No | `https://api.groq.com/openai/v1` | Groq OpenAI-compatible endpoint |
+| `SERPER_API_KEY` | **Yes** (for Alumni) | *None* | Your Serper Google Search API key from serper.dev for Verified Alumni Search |
+| `SEARCH_PROVIDER` | No | `serper` | Search provider (`serper`, `brave`, or `tavily`) |
+| `ALUMNI_COLLEGE_NAME` | No | `Government College of Technology` | Primary college name for verification |
+| `ALUMNI_COLLEGE_ALIASES` | No | `GCT` | Accepted comma-separated college aliases |
 | `OPENAI_API_KEY` | No | *None* | Optional fallback if using OpenAI |
 | `OPENAI_MODEL` | No | `gpt-4o-mini` | Optional model name for OpenAI |
 
@@ -55,6 +59,10 @@ git push origin main
    ```toml
    GROQ_API_KEY = "gsk_your_actual_groq_api_key_here"
    GROQ_MODEL = "qwen/qwen3.8-27b"
+
+   # Alumni Finder
+   SEARCH_PROVIDER = "serper"
+   SERPER_API_KEY = "your_serper_api_key_here"
    ```
 3. Click **"Save"**.
 
