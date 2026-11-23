@@ -68,7 +68,12 @@ class AlumniConfig:
             search_provider or _get_setting("SEARCH_PROVIDER", "serper")
         ).lower()
 
-        self.serper_api_key = serper_api_key or _get_setting("SERPER_API_KEY", "")
+        self.serper_api_key = (
+            serper_api_key
+            or _get_setting("SERPER_API_KEY", "")
+            or _get_setting("SERP_API_KEY", "")
+            or _get_setting("SERPAPI_API_KEY", "")
+        )
         self.brave_api_key = _get_setting("BRAVE_API_KEY", "")
         self.tavily_api_key = _get_setting("TAVILY_API_KEY", "")
 
