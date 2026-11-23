@@ -60,7 +60,7 @@ class AlumniCandidate(BaseModel):
 
     full_name: str = Field(min_length=1, description="Full name of the candidate")
     education: EducationRecord | None = None
-    current_employer: str = Field(min_length=1, description="Current employer organization")
+    current_employer: str | None = Field(default=None, description="Current employer organization")
     designation: str | None = None
     profile_url: HttpUrl | None = None
     evidence: list[EvidenceItem] = Field(default_factory=list)

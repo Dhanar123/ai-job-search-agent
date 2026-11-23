@@ -232,7 +232,7 @@ def render_alumni_tab(
 
                     with col_emp:
                         st.markdown("**💼 Current Employment Verification:**")
-                        st.caption(f"Employer: {a.current_employer}")
+                        st.caption(f"Employer: {a.current_employer or canonical}")
                         if a.employment_evidence:
                             st.markdown(
                                 f'<blockquote style="font-size:0.85rem;border-left:3px solid #10b981;'
