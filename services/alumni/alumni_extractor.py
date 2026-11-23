@@ -21,19 +21,23 @@ logger = logging.getLogger(__name__)
 _EXTRACTION_SYSTEM_PROMPT = """\
 You are an expert alumni information extraction assistant.
 
-Your task is to extract mentions of alumni candidates from the provided web search results.
+Your task is to extract mentions of people who studied at a specific college AND currently work at a specific company, from web search results (titles, URLs, and snippets).
 
 CRITICAL RULES:
-1. Extract ONLY facts that are literally and explicitly present in the search snippets and titles.
-2. NEVER infer, guess, assume, or extrapolate any qualifications, degrees, graduation years, titles, or employers.
-3. If a field is not explicitly stated in the text, set it to null.
-4. For every candidate, you MUST extract the exact supporting quote from the search result and cite the corresponding source URL.
-5. If no candidate information is found in the search results, return an empty list of candidates.
-6. Return valid JSON only, matching the required schema. No markdown fences or conversational commentary.
+1. Extract facts from titles, URLs, AND snippets. LinkedIn titles often contain the person's name, job title, and company (e.g. "John Doe - Software Engineer - GitLab | LinkedIn").
+2. If the title says "Name - Title at Company" that counts as employment evidence. Quote the full title.
+3. If the snippet or title mentions the college name (or its abbreviation like "GCT"), that counts as education evidence. Quote the relevant part.
+4. Use the search result URL as the source URL for any evidence found in that result.
+5. If a field is not explicitly stated, set it to null.
+6. Extract ALL matching candidates, not just the first one. Look across ALL search results.
+7. The education_quote and employment_quote can come from the SAME search result if both facts appear in it (title + snippet combined).
+8. Return valid JSON only, matching the required schema. No markdown fences or commentary.
 """
 
 _EXTRACTION_USER_TEMPLATE = """\
-Extract all alumni candidate mentions for company '{company}' and college '{college}' from these search results:
+Extract all people who appear to be alumni of '{college}' (also known as: GCT, GCT Coimbatore, Government College of Technology) AND are connected to company '{company}'.
+
+Look at EVERY search result below. For each person found, extract their details.
 
 Search Results:
 {search_results_text}
@@ -42,19 +46,19 @@ JSON Schema required:
 {{
   "candidates": [
     {{
-      "full_name": "Full Name",
+      "full_name": "Full Name of the person",
       "designation": "Job Title or null",
-      "current_employer": "Current Employer or null",
-      "profile_url": "https://... or null",
+      "current_employer": "Company name from the search result or null",
+      "profile_url": "URL of their profile page or null",
       "education": {{
-        "institution": "College Name or null",
+        "institution": "College Name mentioned or null",
         "degree": "Degree or null",
         "years": "Graduation Years or null"
       }},
-      "education_quote": "Exact verbatim quote from the text stating education or null",
-      "education_source_url": "URL of the search result containing education quote or null",
-      "employment_quote": "Exact verbatim quote from the text stating current employment or null",
-      "employment_source_url": "URL of the search result containing employment quote or null"
+      "education_quote": "Exact text from title or snippet mentioning the college, or null",
+      "education_source_url": "URL of the search result that contains the education mention",
+      "employment_quote": "Exact text from title or snippet mentioning their role/company, or null",
+      "employment_source_url": "URL of the search result that contains the employment mention"
     }}
   ]
 }}

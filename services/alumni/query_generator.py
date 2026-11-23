@@ -10,7 +10,7 @@ from services.alumni.schemas import CompanyGroup
 logger = logging.getLogger(__name__)
 
 # Common professional role keywords to target alumni in relevant fields
-_DEFAULT_ROLE_KEYWORDS = ["software OR engineer OR developer", "engineer", "lead OR manager"]
+_DEFAULT_ROLE_KEYWORDS = ["software engineer", "developer", "engineer", "lead", "manager"]
 
 # Site hints for accessible public profile directories
 _PROFILE_SITES = ["site:linkedin.com/in"]
@@ -22,11 +22,9 @@ def generate_company_queries(
 ) -> list[str]:
     """Build targeted, diverse search queries for a company group and college variants.
 
-    Combines:
-    - College variants (full name, abbreviation, city variants)
-    - Company canonical name + any significant aliases
-    - Professional role keywords
-    - Public profile search hints (site:linkedin.com/in)
+    Strategy: mix broad queries (no site: constraint) with LinkedIn-specific ones,
+    and vary between quoted exact-match and unquoted flexible queries so that at
+    least some queries return results even for uncommon companies or colleges.
 
     Args:
         company_group: CompanyGroup instance with canonical name and aliases.
@@ -55,35 +53,36 @@ def generate_company_queries(
         if clean and clean not in queries:
             queries.append(clean)
 
-    # 1. Primary site-targeted query with primary college variant
     primary_college = college_variants[0]
-    _add(f'{_PROFILE_SITES[0]} "{canonical}" "{primary_college}"')
+    abbrev = college_variants[1] if len(college_variants) > 1 else None
+    city_variant = college_variants[2] if len(college_variants) > 2 else None
 
-    # 2. Site-targeted query with second college variant (e.g. abbreviation "GCT")
-    if len(college_variants) > 1:
-        _add(f'{_PROFILE_SITES[0]} "{canonical}" "{college_variants[1]}"')
+    # ── High-yield broad queries (no site: constraint) ───────────────
+    # These return results from LinkedIn, alumni pages, university sites, etc.
+    _add(f'{canonical} "{primary_college}" alumni')
+    if abbrev:
+        _add(f'{canonical} {abbrev} alumni')
 
-    # 3. Site-targeted query with role keywords
-    _add(f'{_PROFILE_SITES[0]} "{canonical}" "{primary_college}" {_DEFAULT_ROLE_KEYWORDS[0]}')
+    # ── LinkedIn-targeted queries ────────────────────────────────────
+    _add(f'{_PROFILE_SITES[0]} {canonical} "{primary_college}"')
+    if abbrev:
+        _add(f'{_PROFILE_SITES[0]} {canonical} {abbrev}')
 
-    # 4. Third college variant (e.g. "GCT Coimbatore")
-    if len(college_variants) > 2:
-        _add(f'{_PROFILE_SITES[0]} "{canonical}" "{college_variants[2]}"')
+    # ── Flexible unquoted queries (broader matching) ─────────────────
+    _add(f'{canonical} "Government College of Technology" OR GCT')
+    _add(f'{canonical} GCT Coimbatore engineer OR developer')
 
-    # 5. Broad alumni query without site constraint
-    _add(f'"{canonical}" "{primary_college}" alumni')
+    # ── With role keywords ───────────────────────────────────────────
+    if abbrev:
+        _add(f'{_PROFILE_SITES[0]} {canonical} {abbrev} {_DEFAULT_ROLE_KEYWORDS[0]}')
 
-    # 6. Alias query if available
+    # ── City variant ─────────────────────────────────────────────────
+    if city_variant:
+        _add(f'{canonical} "{city_variant}" alumni')
+
+    # ── Alias queries ────────────────────────────────────────────────
     if valid_aliases:
-        _add(f'{_PROFILE_SITES[0]} "{valid_aliases[0]}" "{primary_college}"')
-
-    # 7. Additional college variant + role keywords
-    if len(college_variants) > 1:
-        _add(f'{_PROFILE_SITES[0]} "{canonical}" "{college_variants[1]}" {_DEFAULT_ROLE_KEYWORDS[1]}')
-
-    # 8. Broad query with abbreviation and alumni
-    if len(college_variants) > 1:
-        _add(f'"{canonical}" "{college_variants[1]}" alumni')
+        _add(f'{valid_aliases[0]} "{primary_college}" alumni')
 
     # Cap to max_queries_per_company
     capped_queries = queries[: cfg.max_queries_per_company]
