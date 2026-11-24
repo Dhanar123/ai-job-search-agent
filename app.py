@@ -256,6 +256,27 @@ def create_manual_profile(
     )
 
 
+def balance_jobs_by_company(jobs: list[FilteredJob], max_total: int) -> list[FilteredJob]:
+    """Evenly distribute shortlist across companies so one company does not monopolize all slots."""
+    if not jobs or max_total <= 0:
+        return []
+
+    by_comp: dict[str, list[FilteredJob]] = {}
+    for j in jobs:
+        comp = (j.company or "unknown").strip().lower()
+        by_comp.setdefault(comp, []).append(j)
+
+    balanced: list[FilteredJob] = []
+    # Round-robin selection across unique companies
+    while len(balanced) < max_total and any(by_comp.values()):
+        for comp in list(by_comp.keys()):
+            if by_comp[comp] and len(balanced) < max_total:
+                balanced.append(by_comp[comp].pop(0))
+            if not by_comp[comp]:
+                del by_comp[comp]
+    return balanced
+
+
 # ── Pipeline Orchestrator ───────────────────────────────────────────
 
 async def execute_full_pipeline(
@@ -294,8 +315,8 @@ async def execute_full_pipeline(
     if not eligible_filtered:
         return ValidationReport(), stats, scan_errors
 
-    # Limit to top candidates for description enrichment and LLM scoring
-    shortlist = eligible_filtered[:max_eval_jobs]
+    # Limit to top candidates evenly distributed across companies
+    shortlist = balance_jobs_by_company(eligible_filtered, max_eval_jobs)
     stats["shortlisted"] = len(shortlist)
 
     # Stage 3: Enriching full descriptions

@@ -565,21 +565,38 @@ def evaluate_job(job: JobPosting, criteria: FilterCriteria) -> FilteredJob:
                 eval_res.passed_reasons.append(f"Title tokens match role: '{target}'")
                 break
 
-        # If not matched in title, check description
-        if not matched_target and desc:
+        # Obvious non-technical role indicators that should never match technical queries
+        non_tech_patterns = [
+            r"\baccount executive\b", r"\bsales\b", r"\bbrand designer\b", r"\bproduct designer\b",
+            r"\bgraphic designer\b", r"\bcustomer activation\b", r"\bcustomer success\b",
+            r"\brecruiter\b", r"\btalent acquisition\b", r"\bcopywriter\b", r"\bmarketing\b",
+            r"\bbusiness systems analyst\b", r"\blegal\b", r"\bfinance\b",
+        ]
+        title_lower = title.lower()
+        is_explicit_non_tech = any(re.search(p, title_lower) for p in non_tech_patterns)
+
+        # If targeting engineering/technical, do not let non-tech titles match merely via description boilerplate
+        is_targeting_tech = any(
+            t in " ".join(role_targets).lower()
+            for t in ("engineer", "developer", "software", "backend", "frontend", "fullstack", "devops", "data")
+        )
+
+        # If not matched in title, check description (only if not an obvious non-tech title)
+        if not matched_target and desc and not (is_targeting_tech and is_explicit_non_tech):
             desc_tokens = _extract_word_tokens(desc)
             for target in role_targets:
                 target_lower = target.lower()
-                # Direct phrase in description
-                if re.search(r'\b' + re.escape(target_lower) + r'\b', desc.lower()):
-                    matched_target = True
-                    eval_res.passed_reasons.append(f"Description matches keyword: '{target}'")
-                    break
+                # Direct phrase in description (avoid common words like 'software' alone)
+                if len(target_lower) > 4 and target_lower not in {"software", "engineer", "developer"}:
+                    if re.search(r'\b' + re.escape(target_lower) + r'\b', desc.lower()):
+                        matched_target = True
+                        eval_res.passed_reasons.append(f"Description matches keyword: '{target}'")
+                        break
 
                 # Significant distinctive tokens (e.g. "python", "fastapi") in description
                 distinctive_tokens = {
                     t for t in (_extract_word_tokens(target) - _STOPWORDS)
-                    if t not in {"engineer", "developer", "specialist", "consultant"}
+                    if t not in {"engineer", "developer", "specialist", "consultant", "software"}
                 }
                 if distinctive_tokens and distinctive_tokens.issubset(desc_tokens):
                     matched_target = True
