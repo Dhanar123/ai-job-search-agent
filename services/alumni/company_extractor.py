@@ -135,6 +135,17 @@ def is_valid_company_name(name: str) -> bool:
     if any(domain_part in clean_lower for domain_part in (".com", ".org", ".net", ".io", ".co", ".in", ".dz", "http:", "https:", "www.")):
         return False
 
+    # Reject pure job role phrases (e.g. "Software Engineer", "Lead Developer")
+    tokens = set(clean_lower.split())
+    role_words = {
+        "software", "engineer", "senior", "lead", "developer", "backend",
+        "frontend", "fullstack", "full", "stack", "intern", "trainee",
+        "associate", "systems", "consultant", "analyst", "manager", "architect",
+        "specialist", "administrator", "programmer", "designer", "scientist",
+    }
+    if tokens and tokens.issubset(role_words):
+        return False
+
     return True
 
 
