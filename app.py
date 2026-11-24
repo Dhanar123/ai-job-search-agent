@@ -403,33 +403,63 @@ with st.sidebar:
 
     # 3. Job Board Sources Configuration
     st.subheader("🌐 Discovery Sources")
-    include_gh = st.checkbox("Greenhouse", value=True, help="Boards like GitLab")
-    gh_board = st.text_input("Greenhouse Board", value="gitlab", disabled=not include_gh)
+    st.caption("Enter comma-separated company tokens to scan multiple companies simultaneously.")
 
-    include_lever = st.checkbox("Lever", value=True, help="Boards like Spotify")
-    lever_company = st.text_input("Lever Slug", value="spotify", disabled=not include_lever)
+    include_gh = st.checkbox("Greenhouse", value=True, help="Companies like GitLab, Stripe, Figma, Airbnb, Postman, Cloudflare, etc.")
+    gh_board = st.text_input(
+        "Greenhouse Board(s)",
+        value="gitlab, stripe, figma",
+        help="Enter one or more comma-separated tokens (e.g. gitlab, stripe, figma, airbnb, postman, cloudflare)",
+        disabled=not include_gh,
+    )
 
-    include_ashby = st.checkbox("Ashby", value=True, help="Boards like Ashby")
-    ashby_board = st.text_input("Ashby Board", value="Ashby", disabled=not include_ashby)
+    include_lever = st.checkbox("Lever", value=True, help="Companies like Spotify, Canva, Datadog, etc.")
+    lever_company = st.text_input(
+        "Lever Slug(s)",
+        value="spotify, canva",
+        help="Enter one or more comma-separated slugs (e.g. spotify, canva, datadog)",
+        disabled=not include_lever,
+    )
 
-    include_rss = st.checkbox("RSS Job Feed", value=True)
+    include_ashby = st.checkbox("Ashby", value=True, help="Companies like OpenAI, Ramp, Linear, Replit, etc.")
+    ashby_board = st.text_input(
+        "Ashby Board(s)",
+        value="Ashby, ramp",
+        help="Enter one or more comma-separated slugs (e.g. Ashby, ramp, linear, replit)",
+        disabled=not include_ashby,
+    )
+
+    include_rss = st.checkbox("RSS Job Feed", value=True, help="Aggregator feeds containing jobs from top tech companies")
     rss_feed = st.text_input(
-        "RSS URL",
+        "RSS URL(s)",
         value="https://weworkremotely.com/categories/remote-programming-jobs.rss",
+        help="Comma-separated RSS feed URLs",
         disabled=not include_rss,
     )
 
 
-# Build list of active provider configs
+# Build list of active provider configs (supports comma-separated tokens)
 active_sources: list[ProviderConfig] = []
 if include_gh and gh_board.strip():
-    active_sources.append(ProviderConfig(provider="greenhouse", identifier=gh_board.strip()))
+    for token in gh_board.split(","):
+        t = token.strip()
+        if t:
+            active_sources.append(ProviderConfig(provider="greenhouse", identifier=t))
 if include_lever and lever_company.strip():
-    active_sources.append(ProviderConfig(provider="lever", identifier=lever_company.strip()))
+    for token in lever_company.split(","):
+        t = token.strip()
+        if t:
+            active_sources.append(ProviderConfig(provider="lever", identifier=t))
 if include_ashby and ashby_board.strip():
-    active_sources.append(ProviderConfig(provider="ashby", identifier=ashby_board.strip()))
+    for token in ashby_board.split(","):
+        t = token.strip()
+        if t:
+            active_sources.append(ProviderConfig(provider="ashby", identifier=t))
 if include_rss and rss_feed.strip():
-    active_sources.append(ProviderConfig(provider="rss", identifier=rss_feed.strip()))
+    for url in rss_feed.split(","):
+        u = url.strip()
+        if u:
+            active_sources.append(ProviderConfig(provider="rss", identifier=u))
 
 
 # ── Main Header ─────────────────────────────────────────────────────
