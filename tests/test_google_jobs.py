@@ -6,7 +6,58 @@ import pytest
 import httpx
 
 from providers.base import JobPosting
-from providers.google_jobs import fetch_jobs, _extract_company_and_role
+from providers.google_jobs import (
+    fetch_jobs,
+    _extract_company_and_role,
+    _is_aggregator_directory_page,
+)
+
+
+def test_is_aggregator_directory_page():
+    assert _is_aggregator_directory_page(
+        "23000 Software Engineer Job Vacancies",
+        "https://in.indeed.com/jobs?q=Software+Engineer&l=India",
+    )
+    assert _is_aggregator_directory_page(
+        "Best Software Engineer Jobs in India 2026",
+        "https://builtin.com/jobs/india",
+    )
+    assert _is_aggregator_directory_page(
+        "Software Engineer Jobs in India - 2027 Batch",
+        "https://www.naukri.com/software-engineer-jobs-2027",
+    )
+    assert _is_aggregator_directory_page(
+        "Software Engineer Jobs in India (11000+ Open Roles)",
+        "https://in.linkedin.com/jobs/software-engineer-jobs",
+    )
+    assert _is_aggregator_directory_page(
+        "15,892 Software engineer jobs in India",
+        "https://in.indeed.com/q-software-engineer-jobs.html",
+    )
+    # Real job postings should NOT be flagged as aggregator directory pages
+    assert not _is_aggregator_directory_page(
+        "Software Engineer at Zoho Corporation",
+        "https://careers.zohocorp.com/jobs/123",
+    )
+    assert not _is_aggregator_directory_page(
+        "Razorpay hiring Software Engineer in Bengaluru",
+        "https://www.linkedin.com/jobs/view/123456789",
+    )
+    assert not _is_aggregator_directory_page(
+        "Software Engineer - PhonePe - Bengaluru",
+        "https://in.indeed.com/viewjob?jk=abcdef1234",
+    )
+
+
+def test_extract_company_from_ats_urls():
+    comp, role = _extract_company_and_role("Software Engineer", "", "https://jobs.lever.co/razorpay/1234")
+    assert comp.lower() == "razorpay"
+
+    comp2, role2 = _extract_company_and_role("Backend Developer", "", "https://boards.greenhouse.io/cloudflare/jobs/5678")
+    assert comp2.lower() == "cloudflare"
+
+    comp3, role3 = _extract_company_and_role("Product Engineer", "", "https://jobs.ashbyhq.com/ramp/9999")
+    assert comp3.lower() == "ramp"
 
 
 def test_extract_company_and_role():
