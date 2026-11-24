@@ -424,33 +424,49 @@ with st.sidebar:
 
     # 3. Job Board Sources Configuration
     st.subheader("🌐 Discovery Sources")
-    st.caption("Enter comma-separated company tokens to scan multiple companies simultaneously.")
+    st.caption("Scan open web via Google Jobs (all companies) or specific ATS boards.")
+
+    # ── Google Jobs Open Web Search ──
+    include_google_jobs = st.checkbox(
+        "🌍 Google Jobs (Open Web - Startups, Mid-Tech & Service MNCs)",
+        value=True,
+        help="Searches jobs from all companies (Zoho, TCS, Infosys, startups, etc.) via Serper Google Jobs API without needing individual board tokens.",
+    )
+    google_jobs_query = st.text_input(
+        "Google Jobs Search Query",
+        value="Software Engineer India",
+        help="Search query for Google Jobs (e.g. 'Software Engineer India', 'Python Developer Coimbatore', 'Backend Engineer Remote')",
+        disabled=not include_google_jobs,
+    )
+
+    st.markdown("---")
+    st.caption("**Specific ATS Boards (Optional):** Enter comma-separated tokens.")
 
     include_gh = st.checkbox("Greenhouse", value=True, help="Companies like GitLab, Stripe, Figma, Airbnb, Postman, Cloudflare, etc.")
     gh_board = st.text_input(
         "Greenhouse Board(s)",
-        value="gitlab, stripe, figma",
-        help="Enter one or more comma-separated tokens (e.g. gitlab, stripe, figma, airbnb, postman, cloudflare)",
+        value="razorpay, postman, cloudflare, stripe",
+        help="Enter one or more comma-separated tokens (e.g. razorpay, postman, cloudflare, stripe, groww)",
         disabled=not include_gh,
     )
 
     include_lever = st.checkbox("Lever", value=True, help="Companies like Spotify, Canva, Datadog, etc.")
     lever_company = st.text_input(
         "Lever Slug(s)",
-        value="spotify, canva",
-        help="Enter one or more comma-separated slugs (e.g. spotify, canva, datadog)",
+        value="canva, spotify",
+        help="Enter one or more comma-separated slugs (e.g. canva, spotify, datadog)",
         disabled=not include_lever,
     )
 
-    include_ashby = st.checkbox("Ashby", value=True, help="Companies like OpenAI, Ramp, Linear, Replit, etc.")
+    include_ashby = st.checkbox("Ashby", value=False, help="Companies like OpenAI, Ramp, Linear, Replit, etc.")
     ashby_board = st.text_input(
         "Ashby Board(s)",
-        value="Ashby, ramp",
-        help="Enter one or more comma-separated slugs (e.g. Ashby, ramp, linear, replit)",
+        value="ramp, Ashby",
+        help="Enter one or more comma-separated slugs (e.g. ramp, linear, Ashby)",
         disabled=not include_ashby,
     )
 
-    include_rss = st.checkbox("RSS Job Feed", value=True, help="Aggregator feeds containing jobs from top tech companies")
+    include_rss = st.checkbox("RSS Job Feed", value=False, help="Aggregator feeds containing jobs from top tech companies")
     rss_feed = st.text_input(
         "RSS URL(s)",
         value="https://weworkremotely.com/categories/remote-programming-jobs.rss",
@@ -461,6 +477,11 @@ with st.sidebar:
 
 # Build list of active provider configs (supports comma-separated tokens)
 active_sources: list[ProviderConfig] = []
+if include_google_jobs and google_jobs_query.strip():
+    for q_item in google_jobs_query.split(","):
+        q_clean = q_item.strip()
+        if q_clean:
+            active_sources.append(ProviderConfig(provider="google_jobs", identifier=q_clean))
 if include_gh and gh_board.strip():
     for token in gh_board.split(","):
         t = token.strip()
