@@ -46,6 +46,8 @@ def _get_serper_key() -> str:
 def _extract_company_and_role(raw_title: str, snippet: str, link: str) -> tuple[str, str]:
     """Extract clean company name and job title from search result metadata."""
     title = raw_title.strip()
+    # Strip common site suffixes
+    title = re.sub(r"\s*[-–|•:]\s*(LinkedIn|Naukri\.com|Indeed\.com|Glassdoor|Foundit|Instahyre)\b.*$", "", title, flags=re.IGNORECASE).strip()
 
     # Pattern: "Role at Company" or "Role @ Company"
     m_at = re.search(r"^(.*?)\s+(?:at|@)\s+(.*?)(?:\s*[-–|•:]\s*.*)?$", title, re.IGNORECASE)
@@ -64,7 +66,7 @@ def _extract_company_and_role(raw_title: str, snippet: str, link: str) -> tuple[
         candidate_company = parts[1].strip()
         # Clean out common noise from company string
         candidate_company = re.sub(
-            r"\b(careers?|jobs?|job openings?|recruitment|india|usa|hiring)\b",
+            r"\b(careers?|jobs?|job openings?|recruitment|india|usa|hiring|remote|in\s+.*)\b",
             "",
             candidate_company,
             flags=re.IGNORECASE,
@@ -90,7 +92,7 @@ async def _fetch_serper_search_jobs(
     api_key: str,
     client: httpx.AsyncClient,
 ) -> list[JobPosting]:
-    """Query Serper /search with targeted job queries."""
+    """Query Serper /search with unquoted flexible job queries."""
     if not api_key:
         return []
 
@@ -98,12 +100,21 @@ async def _fetch_serper_search_jobs(
         "X-API-KEY": api_key,
         "Content-Type": "application/json",
     }
-    # Formulate query to discover real career postings
-    search_q = f'"{query}" (careers OR jobs OR "apply now") -inurl:login'
-    payload = {
+    # Clean query from quotes to avoid over-restrictive phrase matching
+    clean_q = re.sub(r'["\']', '', query).strip()
+    search_q = f"{clean_q} jobs hiring careers"
+
+    payload: dict[str, Any] = {
         "q": search_q,
         "num": 25,
     }
+
+    # If targeting Indian locations, localize Google search parameters
+    q_lower = clean_q.lower()
+    indian_locations = ("india", "bangalore", "bengaluru", "chennai", "coimbatore", "hyderabad", "pune", "mumbai", "delhi", "noida")
+    if any(loc in q_lower for loc in indian_locations):
+        payload["gl"] = "in"
+        payload["hl"] = "en"
 
     resp = await client.post(_SERPER_SEARCH_URL, headers=headers, json=payload, timeout=_TIMEOUT)
     if resp.status_code != 200:
@@ -136,6 +147,7 @@ async def _fetch_serper_search_jobs(
             )
         )
 
+    logger.info("Serper Open Web returned %d job postings for '%s'.", len(results), clean_q)
     return results
 
 
@@ -151,7 +163,8 @@ async def _fetch_arbeitnow_jobs(
 
         data = resp.json()
         raw_jobs = data.get("data", [])
-        q_tokens = [t.lower() for t in query.split() if len(t) > 2]
+        clean_q = re.sub(r'["\']', '', query).lower()
+        q_tokens = [t for t in clean_q.split() if len(t) > 2 and t not in ("jobs", "hiring", "careers", "india")]
 
         results: list[JobPosting] = []
         for j in raw_jobs:
@@ -167,7 +180,6 @@ async def _fetch_arbeitnow_jobs(
             # Check if relevant to search tokens if tokens provided
             if q_tokens:
                 combined = f"{title} {loc} {desc}".lower()
-                # Accept if any query token matches (e.g. "software", "engineer", "python", "developer")
                 if not any(token in combined for token in q_tokens):
                     continue
 

@@ -259,7 +259,7 @@ async def match_single_job(
         title=job.title,
         company=job.company,
         location=job.location or "Unspecified",
-        description=job_desc[:3_500],  # guard against excessively long descriptions to protect token rate limits
+        description=job_desc[:1_500],  # guard against excessively long descriptions to protect token rate limits
     )
 
     response = None
@@ -284,7 +284,7 @@ async def match_single_job(
             last_exc = exc
             err_str = str(exc).lower()
             if ("429" in err_str or "rate_limit" in err_str) and attempt < max_retries - 1:
-                wait_time = 0.5 * (attempt + 1)
+                wait_time = 3.0 * (attempt + 1)
                 logger.info("Rate limit hit on attempt %d; waiting %.1fs before retry...", attempt + 1, wait_time)
                 await asyncio.sleep(wait_time)
             else:
@@ -421,7 +421,7 @@ async def rank_jobs(
     async def _safe_match(j: JobPosting) -> MatchResult:
         async with semaphore:
             res = await match_single_job(profile, j, client=llm_client, model=resolved_model)
-            await asyncio.sleep(0.4)  # pace requests to stay well within tokens-per-minute limits
+            await asyncio.sleep(0.8)  # pace requests to stay well within tokens-per-minute limits
             return res
 
     tasks = [_safe_match(j) for j in jobs]
