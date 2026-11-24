@@ -60,21 +60,14 @@ def generate_company_queries(
     # ── High-yield broad queries (no site: constraint) ───────────────
     # These return results from LinkedIn, alumni pages, university sites, etc.
     _add(f'{canonical} "{primary_college}" alumni')
-    if abbrev:
-        _add(f'{canonical} {abbrev} alumni')
+    _add(f'{canonical} "GCT Coimbatore" alumni')
 
     # ── LinkedIn-targeted queries ────────────────────────────────────
     _add(f'{_PROFILE_SITES[0]} {canonical} "{primary_college}"')
-    if abbrev:
-        _add(f'{_PROFILE_SITES[0]} {canonical} {abbrev}')
+    _add(f'{_PROFILE_SITES[0]} {canonical} "GCT Coimbatore"')
 
-    # ── Flexible unquoted queries (broader matching) ─────────────────
-    _add(f'{canonical} "Government College of Technology" OR GCT')
-    _add(f'{canonical} GCT Coimbatore engineer OR developer')
-
-    # ── With role keywords ───────────────────────────────────────────
-    if abbrev:
-        _add(f'{_PROFILE_SITES[0]} {canonical} {abbrev} {_DEFAULT_ROLE_KEYWORDS[0]}')
+    # ── Role keywords with institutional anchor ──────────────────────
+    _add(f'{_PROFILE_SITES[0]} {canonical} GCT Coimbatore {_DEFAULT_ROLE_KEYWORDS[0]}')
 
     # ── City variant ─────────────────────────────────────────────────
     if city_variant:

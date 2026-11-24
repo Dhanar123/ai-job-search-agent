@@ -137,3 +137,29 @@ class AlumniPipelineReport(BaseModel):
     companies_no_match: int = 0
     api_calls_used: int = 0
     company_results: list[CompanyAlumniResult] = Field(default_factory=list)
+
+
+class RawExtractedCandidate:
+    """Internal container for raw extracted candidate before formal verification."""
+
+    def __init__(
+        self,
+        full_name: str,
+        current_employer: str,
+        designation: str | None = None,
+        profile_url: str | None = None,
+        education: dict[str, Any] | None = None,
+        education_quote: str | None = None,
+        education_source_url: str | None = None,
+        employment_quote: str | None = None,
+        employment_source_url: str | None = None,
+    ) -> None:
+        self.full_name = full_name
+        self.current_employer = current_employer
+        self.designation = designation
+        self.profile_url = profile_url
+        self.education = education or {}
+        self.education_quote = education_quote
+        self.education_source_url = education_source_url
+        self.employment_quote = employment_quote
+        self.employment_source_url = employment_source_url
