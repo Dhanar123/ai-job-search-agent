@@ -512,6 +512,25 @@ def _extract_word_tokens(text: str) -> set[str]:
 
 _STOPWORDS = {"and", "or", "the", "for", "with", "in", "of", "to", "at", "a", "an"}
 
+_LOCATION_TOKENS = {
+    "india", "bangalore", "bengaluru", "chennai", "hyderabad", "pune",
+    "mumbai", "delhi", "noida", "gurgaon", "gurugram", "coimbatore",
+    "remote", "us", "usa", "uk", "germany", "singapore", "worldwide", "global",
+}
+
+_CITY_ALIASES = {
+    "bangalore": "bengaluru",
+    "bengaluru": "bangalore",
+    "mumbai": "bombay",
+    "bombay": "mumbai",
+    "chennai": "madras",
+    "madras": "chennai",
+    "gurgaon": "gurugram",
+    "gurugram": "gurgaon",
+    "calcutta": "kolkata",
+    "kolkata": "calcutta",
+}
+
 
 def evaluate_job(job: JobPosting, criteria: FilterCriteria) -> FilteredJob:
     """Evaluate a single job posting against candidate filter criteria.
@@ -563,6 +582,13 @@ def evaluate_job(job: JobPosting, criteria: FilterCriteria) -> FilteredJob:
             if target_tokens and target_tokens.issubset(title_tokens):
                 matched_target = True
                 eval_res.passed_reasons.append(f"Title tokens match role: '{target}'")
+                break
+
+            # Smart role token subset match (stripping embedded location tokens like 'india', 'bangalore')
+            role_tokens = target_tokens - _LOCATION_TOKENS
+            if role_tokens and role_tokens.issubset(title_tokens):
+                matched_target = True
+                eval_res.passed_reasons.append(f"Title tokens match core role: '{target}'")
                 break
 
         # Obvious non-technical role indicators that should never match technical queries
@@ -658,27 +684,30 @@ def evaluate_job(job: JobPosting, criteria: FilterCriteria) -> FilteredJob:
         else:
             loc_lower = loc.lower()
             matched_loc = any(
-                pl in loc_lower or (pl == "remote" and is_remote_friendly(loc, desc))
+                pl in loc_lower
+                or (_CITY_ALIASES.get(pl) and _CITY_ALIASES[pl] in loc_lower)
+                or (pl == "remote" and is_remote_friendly(loc, desc))
                 for pl in pref_locs_clean
             )
             if matched_loc:
                 eval_res.location_match = True
                 eval_res.passed_reasons.append(f"Location matches preference: '{loc}'")
+            elif any("remote" in pl for pl in pref_locs_clean) and is_remote_friendly(loc, desc):
+                eval_res.location_match = True
+                eval_res.passed_reasons.append("Matched remote eligibility preference")
+            elif is_remote_friendly(loc, desc):
+                eval_res.location_match = True
+                eval_res.passed_reasons.append("Remote job compatible with location preference")
             else:
-                # If candidate asked for "remote" and job is remote-friendly
-                if any("remote" in pl for pl in pref_locs_clean) and is_remote_friendly(loc, desc):
-                    eval_res.location_match = True
-                    eval_res.passed_reasons.append("Matched remote eligibility preference")
-                else:
-                    eval_res.location_match = False
-                    eval_res.failure_reasons.append(f"Location '{loc}' does not match preferences: {criteria.locations}")
-                    return FilteredJob(
-                        **job.model_dump(),
-                        is_eligible=False,
-                        status=EligibilityStatus.REJECTED,
-                        unknown_fields=eval_res.unknown_fields,
-                        evaluation=eval_res,
-                    )
+                eval_res.location_match = False
+                eval_res.failure_reasons.append(f"Location '{loc}' does not match preferences: {criteria.locations}")
+                return FilteredJob(
+                    **job.model_dump(),
+                    is_eligible=False,
+                    status=EligibilityStatus.REJECTED,
+                    unknown_fields=eval_res.unknown_fields,
+                    evaluation=eval_res,
+                )
     else:
         eval_res.location_match = True
 

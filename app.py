@@ -532,24 +532,28 @@ with tab_criteria:
 
     # Defaults pre-populated from parsed profile if present
     pref = st.session_state.profile.preferences if st.session_state.profile else None
-    default_roles = ", ".join(pref.preferred_roles) if pref and pref.preferred_roles else "Software Engineer, Backend, Python"
-    default_locations = ", ".join(pref.preferred_locations) if pref and pref.preferred_locations else "Remote, United States"
-    default_exp_level = pref.experience_level.capitalize() if pref and pref.experience_level else "Senior"
-    default_years = st.session_state.profile.total_experience_years if st.session_state.profile else 5
+    default_roles = ", ".join(pref.preferred_roles) if pref and pref.preferred_roles else "Software Engineer, Backend, Python, Developer"
+    default_locations = ", ".join(pref.preferred_locations) if pref and pref.preferred_locations else "India, Bangalore, Bengaluru, Remote"
+    default_exp_level = pref.experience_level.capitalize() if pref and pref.experience_level else "Entry"
+    default_years = st.session_state.profile.total_experience_years if st.session_state.profile else 1
 
     col_r1, col_r2 = st.columns(2)
     with col_r1:
         roles_input = st.text_input(
             "Job Roles & Keywords (comma-separated)",
             value=default_roles,
-            help="Keywords to match against job titles and core requirements.",
+            help="Job role titles to match (e.g. 'Software Engineer, Backend, Python'). Location names should be placed in Preferred Locations below.",
         )
         locations_input = st.text_input(
             "Preferred Locations (comma-separated)",
             value=default_locations,
-            help="Cities, countries, or regions.",
+            help="Target cities or countries (e.g. 'India, Bangalore, Bengaluru, Remote').",
         )
-        remote_only_input = st.checkbox("Remote Only", value=True)
+        remote_only_input = st.checkbox(
+            "Remote Only",
+            value=False,
+            help="Check this only if you want 100% remote jobs exclusively. Uncheck to allow on-site, hybrid, and remote jobs.",
+        )
 
     with col_r2:
         col_s1, col_s2 = st.columns(2)
