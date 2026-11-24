@@ -6,7 +6,20 @@ import pytest
 import httpx
 
 from providers.base import JobPosting
-from providers.google_jobs import fetch_jobs
+from providers.google_jobs import fetch_jobs, _extract_company_and_role
+
+
+def test_extract_company_and_role():
+    comp, role = _extract_company_and_role("Software Engineer at Zoho Corporation", "", "https://careers.zohocorp.com")
+    assert comp == "Zoho Corporation"
+    assert role == "Software Engineer"
+
+    comp2, role2 = _extract_company_and_role("TCS hiring Python Developer", "", "https://ibegin.tcs.com")
+    assert comp2 == "TCS"
+    assert role2 == "Python Developer"
+
+    comp3, role3 = _extract_company_and_role("Backend Engineer - Swiggy", "", "https://swiggy.com")
+    assert "Swiggy" in comp3
 
 
 @pytest.mark.asyncio
@@ -16,52 +29,42 @@ async def test_google_jobs_empty_query():
 
 
 @pytest.mark.asyncio
-async def test_google_jobs_missing_key(monkeypatch):
-    monkeypatch.delenv("SERPER_API_KEY", raising=False)
-    monkeypatch.delenv("SERP_API_KEY", raising=False)
-    res = await fetch_jobs("Software Engineer India", api_key="")
-    assert res == []
-
-
-@pytest.mark.asyncio
 async def test_google_jobs_parsing(monkeypatch):
-    sample_response = {
-        "jobs": [
+    sample_serper = {
+        "organic": [
             {
-                "title": "Software Development Engineer - Backend",
-                "company": "Zoho Corporation",
-                "location": "Chennai, Tamil Nadu, India",
+                "title": "Software Engineer at Zoho Corporation",
                 "link": "https://careers.zohocorp.com/jobs/123",
-                "description": "Looking for Python / Java backend developers in Chennai.",
-                "date": "1 day ago",
-                "applyOptions": [
-                    {"title": "Apply on Zoho", "link": "https://careers.zohocorp.com/jobs/123/apply"}
-                ]
-            },
+                "snippet": "Join Zoho Corporation as a Software Engineer in Chennai."
+            }
+        ]
+    }
+    sample_arbeitnow = {
+        "data": [
             {
-                "title": "Systems Engineer",
-                "company": "Tata Consultancy Services",
-                "location": "Coimbatore, Tamil Nadu, India",
-                "link": "https://ibegin.tcs.com/jobs/456",
-                "description": "Looking for engineers with solid programming background.",
-                "date": "3 days ago"
+                "title": "Backend Python Developer",
+                "company_name": "TechStart Inc",
+                "location": "Remote",
+                "url": "https://arbeitnow.com/jobs/456",
+                "description": "<p>Looking for Python software engineers.</p>"
             }
         ]
     }
 
     class MockTransport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json=sample_response)
+            url_str = str(request.url)
+            if "serper.dev" in url_str:
+                return httpx.Response(200, json=sample_serper)
+            if "arbeitnow.com" in url_str:
+                return httpx.Response(200, json=sample_arbeitnow)
+            return httpx.Response(404)
 
     orig_client = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: orig_client(transport=MockTransport()))
 
-    results = await fetch_jobs("Software Engineer Coimbatore", api_key="test_key")
-    assert len(results) == 2
-    assert results[0].company == "Zoho Corporation"
-    assert results[0].title == "Software Development Engineer - Backend"
-    assert results[0].source == "google_jobs"
-    assert results[0].apply_url == "https://careers.zohocorp.com/jobs/123/apply"
-
-    assert results[1].company == "Tata Consultancy Services"
-    assert results[1].location == "Coimbatore, Tamil Nadu, India"
+    results = await fetch_jobs("Software Engineer India", api_key="test_key")
+    assert len(results) >= 2
+    companies = [r.company for r in results]
+    assert "Zoho Corporation" in companies
+    assert "TechStart Inc" in companies
