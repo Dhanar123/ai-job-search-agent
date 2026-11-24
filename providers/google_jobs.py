@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import httpx
 
 from providers.base import JobPosting, ProviderError
+from services.alumni.company_extractor import is_valid_company_name, _JOB_BOARDS_AND_PORTALS
 
 logger = logging.getLogger(__name__)
 
@@ -47,44 +48,69 @@ def _extract_company_and_role(raw_title: str, snippet: str, link: str) -> tuple[
     """Extract clean company name and job title from search result metadata."""
     title = raw_title.strip()
     # Strip common site suffixes
-    title = re.sub(r"\s*[-–|•:]\s*(LinkedIn|Naukri\.com|Indeed\.com|Glassdoor|Foundit|Instahyre)\b.*$", "", title, flags=re.IGNORECASE).strip()
+    title = re.sub(
+        r"\s*[-–|•:]\s*(LinkedIn|Naukri(?:\.com)?|Indeed(?:\.com)?|Glassdoor|Foundit|Instahyre|Builtin|Nextleap|Michael\s*Page)\b.*$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    ).strip()
 
     # Pattern: "Role at Company" or "Role @ Company"
     m_at = re.search(r"^(.*?)\s+(?:at|@)\s+(.*?)(?:\s*[-–|•:]\s*.*)?$", title, re.IGNORECASE)
-    if m_at and len(m_at.group(2).strip()) > 1:
-        return m_at.group(2).strip(), m_at.group(1).strip()
+    if m_at:
+        cand_comp = m_at.group(2).strip()
+        cand_role = m_at.group(1).strip()
+        if is_valid_company_name(cand_comp):
+            return cand_comp, cand_role
 
     # Pattern: "Company hiring Role"
     m_hiring = re.search(r"^(.*?)\s+hiring\s+(.*?)(?:\s*[-–|•:]\s*.*)?$", title, re.IGNORECASE)
-    if m_hiring and len(m_hiring.group(1).strip()) > 1:
-        return m_hiring.group(1).strip(), m_hiring.group(2).strip()
+    if m_hiring:
+        cand_comp = m_hiring.group(1).strip()
+        cand_role = m_hiring.group(2).strip()
+        if is_valid_company_name(cand_comp):
+            return cand_comp, cand_role
 
     # Pattern: "Role - Company - Location" or "Role | Company"
     parts = re.split(r"\s*[-–|•]\s*", title)
     if len(parts) >= 2:
         candidate_role = parts[0].strip()
         candidate_company = parts[1].strip()
-        # Clean out common noise from company string
         candidate_company = re.sub(
             r"\b(careers?|jobs?|job openings?|recruitment|india|usa|hiring|remote|in\s+.*)\b",
             "",
             candidate_company,
             flags=re.IGNORECASE,
         ).strip()
-        if candidate_company and len(candidate_company) > 1:
+        if is_valid_company_name(candidate_company):
             return candidate_company, candidate_role
 
-    # Fallback to extracting domain name from link
+    # Check snippet for company hints: "at Company" or "Company is hiring"
+    m_snip_at = re.search(r"\b(?:at|@)\s+([A-Za-z0-9&.\s]{2,30})\b", snippet, re.IGNORECASE)
+    if m_snip_at:
+        cand_comp = m_snip_at.group(1).strip()
+        if is_valid_company_name(cand_comp):
+            return cand_comp, title
+
+    # Fallback to extracting domain name from link ONLY IF not an aggregator/portal
     try:
         netloc = urlparse(link).netloc.lower()
-        netloc = re.sub(r"^(?:www\.|careers\.|jobs\.|apply\.)", "", netloc)
-        base_name = netloc.split(".")[0].capitalize()
-        if base_name and base_name not in ("Linkedin", "Naukri", "Indeed", "Glassdoor"):
+        # Remove common prefixes
+        netloc = re.sub(r"^(?:www\.|careers\.|jobs\.|apply\.|boards\.)", "", netloc)
+        # Handle country subdomains (e.g., in.indeed.com -> indeed.com)
+        parts = netloc.split(".")
+        # If first part is a 2-letter country code (in, ca, uk, us), take the second part
+        if len(parts) >= 3 and len(parts[0]) == 2:
+            base_name = parts[1].capitalize()
+        else:
+            base_name = parts[0].capitalize()
+
+        if base_name and is_valid_company_name(base_name):
             return base_name, title
     except Exception:
         pass
 
-    return "Tech Company", title
+    return "", title
 
 
 async def _fetch_serper_search_jobs(
@@ -134,6 +160,9 @@ async def _fetch_serper_search_jobs(
             continue
 
         company, clean_title = _extract_company_and_role(raw_title, snippet, link)
+        if not is_valid_company_name(company):
+            continue
+
         results.append(
             JobPosting(
                 title=clean_title or raw_title,
@@ -174,7 +203,7 @@ async def _fetch_arbeitnow_jobs(
             loc = str(j.get("location", "") or "").strip()
             desc = str(j.get("description", "") or "").strip()
 
-            if not title or not comp or not url:
+            if not title or not comp or not url or not is_valid_company_name(comp):
                 continue
 
             # Check if relevant to search tokens if tokens provided

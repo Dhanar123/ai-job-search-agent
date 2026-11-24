@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 from pydantic import HttpUrl
 from rapidfuzz import fuzz
 
-from services.alumni.alumni_extractor import RawExtractedCandidate
 from services.alumni.config import AlumniConfig
 from services.alumni.normalizer import normalize_company_name
 from services.alumni.schemas import (
@@ -19,6 +18,7 @@ from services.alumni.schemas import (
     CompanyGroup,
     EducationRecord,
     EvidenceItem,
+    RawExtractedCandidate,
     RejectReason,
     VerificationStatus,
 )
@@ -39,6 +39,93 @@ _PAST_YEAR_RANGE_PATTERN = re.compile(
     r"\b(20[0-2][0-9])\s*[-\u2013to]+\s*(20[0-2][0-5])\b", re.IGNORECASE
 )
 
+# Organizations, acronym collisions, and foreign locations with GCT acronym that are NOT Government College of Technology, Coimbatore
+_FALSE_GCT_ORGANIZATIONS = [
+    "semiconductor",
+    "container terminal",
+    "container terminals",
+    "global container",
+    "connector technology",
+    "global connector",
+    "gulf coast",
+    "samtec",
+    "aesthetic",
+    "gnanamani",
+    "pakistan",
+    "lahore",
+    "bannu",
+    "rasul",
+    "faisalabad",
+    "peshawar",
+    "karachi",
+    "multan",
+    "swat",
+    "taxila",
+    "nigeria",
+    "zambia",
+    "kenya",
+    "ghana",
+]
+
+# Positive anchors confirming Government College of Technology, Coimbatore
+_GCT_POSITIVE_ANCHORS = [
+    "coimbatore",
+    "cbe",
+    "tamil nadu",
+    "tamilnadu",
+    "anna university",
+    "arthur hope",
+    "directorate of technical education",
+    "thadagam",
+    "gct.ac.in",
+    "gctalumni",
+]
+
+# Organizational, web page, or role tokens that indicate a profile is NOT an individual human candidate
+_NON_PERSON_NAME_KEYWORDS = {
+    "login",
+    "about",
+    "about us",
+    "faqs",
+    "faq",
+    "department",
+    "council",
+    "office",
+    "community",
+    "alumni",
+    "network",
+    "bulletin",
+    "showcase",
+    "promo",
+    "awards",
+    "services",
+    "solutions",
+    "technologies",
+    "technology",
+    "college",
+    "university",
+    "institute",
+    "group",
+    "ltd",
+    "inc",
+    "corp",
+    "llc",
+    "gmbh",
+    "foundation",
+    "association",
+    "committee",
+    "cell",
+    "club",
+    "chapter",
+    "hangout",
+    "directverify",
+    "innovation",
+    "faculty",
+    "professor",
+    "hod",
+    "principal",
+}
+
 
 def _is_valid_url(url: str | None) -> bool:
     """Check if URL string is a well-formed HTTP or HTTPS URL."""
@@ -51,26 +138,89 @@ def _is_valid_url(url: str | None) -> bool:
         return False
 
 
+def _is_personal_profile_url(url: str | None) -> bool:
+    """Verify URL corresponds to an individual personal profile rather than a group or corporate page."""
+    if not url or not isinstance(url, str):
+        return False
+    u = url.strip().lower()
+    if not _is_valid_url(u):
+        return False
+    if any(
+        non_personal in u
+        for non_personal in (
+            "/company/",
+            "/school/",
+            "/showcase/",
+            "facebook.com",
+            "twitter.com",
+            "x.com",
+            "youtube.com",
+            "/groups/",
+            "/user/login",
+            ".pdf",
+            ".dz",
+            ".docx",
+        )
+    ):
+        return False
+    return True
+
+
+def _is_valid_person_name(name: str | None) -> bool:
+    """Validate that candidate name corresponds to an individual human person."""
+    if not name or not isinstance(name, str):
+        return False
+    clean = name.strip()
+    if any(c in clean for c in ("@", "|", "/", "\\", ":", "_", ";", "http", "www.", "(", ")", "[", "]")):
+        return False
+    tokens = [t.lower() for t in clean.split() if t]
+    if len(tokens) < 1 or len(tokens) > 5:
+        return False
+    if any(t in _NON_PERSON_NAME_KEYWORDS for t in tokens):
+        return False
+    if "government college" in clean.lower():
+        return False
+    return True
+
+
 def _matches_college(
     institution: str,
     quote: str,
     college_variants: list[str],
 ) -> bool:
-    """Check if institution name or quote matches any accepted college variant."""
+    """Check if institution name or quote matches Government College of Technology, Coimbatore."""
     combined_text = f"{institution} {quote}".lower()
+
+    # Immediate rejection if any known false entity or foreign institute is mentioned
+    if any(false_org in combined_text for false_org in _FALSE_GCT_ORGANIZATIONS):
+        return False
+
+    # Check if primary college full name or historical name is present
+    has_full_name = "government college of technology" in combined_text or "arthur hope" in combined_text
+    has_anchor = any(anchor in combined_text for anchor in _GCT_POSITIVE_ANCHORS)
+
+    if has_full_name:
+        return True
+
+    # If only acronym "GCT" is present, REQUIRE at least one positive anchor or engineering degree mention
+    has_gct_acronym = bool(re.search(r"\bgct\b", combined_text))
+    if has_gct_acronym:
+        if has_anchor:
+            return True
+        if re.search(r"\bgct['’]?\s*\d{2,4}\b", combined_text):
+            return True
+        if any(deg in combined_text for deg in ("b.e", "b.tech", "m.e", "m.tech", "engineering")):
+            return True
+
     for variant in college_variants:
         var_lower = variant.strip().lower()
-        if not var_lower:
+        if not var_lower or var_lower == "gct":
             continue
-        # Exact word/phrase containment or abbreviation boundary
-        if len(var_lower) <= 4:
-            if re.search(rf"\b{re.escape(var_lower)}\b", combined_text):
-                return True
-        else:
-            if var_lower in combined_text:
-                return True
-            if fuzz.partial_ratio(var_lower, combined_text) >= 80:
-                return True
+        if var_lower in combined_text:
+            return True
+        if len(var_lower) > 5 and fuzz.partial_ratio(var_lower, combined_text) >= 85:
+            return True
+
     return False
 
 
@@ -79,23 +229,80 @@ def _matches_company(
     quote: str,
     company_group: CompanyGroup,
 ) -> bool:
-    """Check if employer or quote matches canonical company name or known aliases."""
+    """Check if quote explicitly and unambiguously confirms employment at target company."""
     targets = [company_group.canonical_name] + company_group.aliases
-    combined = f"{employer} {quote}".lower()
-    norm_combined = normalize_company_name(combined)
+    quote_lower = (quote or "").lower()
+    norm_quote = normalize_company_name(quote_lower)
+
+    # 1. Target company name or alias MUST be mentioned in the quote itself
+    quote_matches_target = False
+    matched_target = ""
 
     for target in targets:
         target_clean = target.strip().lower()
-        if not target_clean:
+        if not target_clean or len(target_clean) < 2:
             continue
+
         norm_target = normalize_company_name(target_clean)
-        if norm_target and norm_target in norm_combined:
-            return True
-        if target_clean in combined:
-            return True
-        if fuzz.partial_ratio(target_clean, combined) >= 80:
-            return True
-    return False
+
+        # For short target names (<= 3 chars, e.g. "SAP", "AMD", "HP", "GE"):
+        # Match STRICTLY as whole word to prevent "in" matching every sentence
+        if len(target_clean) <= 3:
+            if re.search(rf"\b{re.escape(target_clean)}\b", quote_lower):
+                quote_matches_target = True
+                matched_target = target_clean
+                break
+        else:
+            if target_clean in quote_lower:
+                quote_matches_target = True
+                matched_target = target_clean
+                break
+            if norm_target and len(norm_target) > 3 and norm_target in norm_quote:
+                quote_matches_target = True
+                matched_target = norm_target
+                break
+            if fuzz.partial_ratio(target_clean, quote_lower) >= 85:
+                quote_matches_target = True
+                matched_target = target_clean
+                break
+
+    if not quote_matches_target:
+        return False
+
+    # 2. Check for conflicting current employer stated in the quote (e.g. "@ PayPal" or "Experience: Wipro")
+    m_employer = re.search(
+        r"(?:@|at\s+|experience:\s*)([A-Za-z0-9&.\s]{2,25})",
+        quote_lower,
+    )
+    if m_employer:
+        stated_employer = m_employer.group(1).strip()
+        stated_norm = normalize_company_name(stated_employer)
+
+        # If stated employer matches any valid target alias, that is allowed
+        matches_any_target = False
+        for target in targets:
+            norm_target = normalize_company_name(target.strip().lower())
+            if norm_target and (norm_target in stated_norm or stated_norm in norm_target):
+                matches_any_target = True
+                break
+
+        if not matches_any_target:
+            # Check if stated employer is a real conflicting company name
+            # Ignore common non-company words like locations or "present"
+            non_company_words = {
+                "present", "current", "bangalore", "bengaluru", "chennai", "hyderabad",
+                "pune", "mumbai", "india", "remote", "hybrid", "onsite", "team", "engineering",
+            }
+            if stated_norm not in non_company_words and len(stated_norm) > 2:
+                if not any(t.lower() in stated_employer for t in targets):
+                    logger.info(
+                        "Conflicting employer '%s' in quote for target '%s'",
+                        stated_employer,
+                        company_group.canonical_name,
+                    )
+                    return False
+
+    return True
 
 
 def verify_alumni_candidate(
@@ -117,6 +324,10 @@ def verify_alumni_candidate(
     college_variants = cfg.get_all_college_variants()
     reject_reasons: list[str] = []
 
+    # 0. Validate Human Person Name
+    if not _is_valid_person_name(candidate.full_name):
+        reject_reasons.append(RejectReason.NAME_MISMATCH.value)
+
     # 1. Structure check for Education Evidence
     edu_valid_url = _is_valid_url(candidate.education_source_url)
     edu_has_quote = bool(candidate.education_quote and candidate.education_quote.strip())
@@ -126,6 +337,13 @@ def verify_alumni_candidate(
         reject_reasons.append(RejectReason.NO_EVIDENCE.value)
         reject_reasons.append(RejectReason.EDUCATION_UNSUPPORTED.value)
     else:
+        # Check source URL viability (reject corporate/login/pdf pages as verified source)
+        if not _is_personal_profile_url(candidate.education_source_url) and not any(
+            legit in str(candidate.education_source_url).lower()
+            for legit in ("gct.ac.in", "gctalumni", ".edu", "alumni")
+        ):
+            reject_reasons.append(RejectReason.UNVERIFIABLE_SOURCE.value)
+
         # Verify college match
         if not _matches_college(edu_inst, candidate.education_quote or "", college_variants):
             reject_reasons.append(RejectReason.EDUCATION_UNSUPPORTED.value)
@@ -140,6 +358,13 @@ def verify_alumni_candidate(
             reject_reasons.append(RejectReason.NO_EVIDENCE.value)
         reject_reasons.append(RejectReason.EMPLOYMENT_NOT_CURRENT.value)
     else:
+        # Check source URL viability
+        if not _is_personal_profile_url(candidate.employment_source_url) and not any(
+            legit in str(candidate.employment_source_url).lower()
+            for legit in ("linkedin.com/in", "github.com", company_group.canonical_name.lower())
+        ):
+            reject_reasons.append(RejectReason.UNVERIFIABLE_SOURCE.value)
+
         quote = candidate.employment_quote or ""
         # Check negative past indicators
         is_past = any(p.search(quote) for p in _PAST_EMPLOYMENT_PATTERNS)
@@ -218,7 +443,7 @@ def verify_alumni_candidate(
 
     # Clean profile URL
     profile_http_url: HttpUrl | None = None
-    if candidate.profile_url and _is_valid_url(candidate.profile_url):
+    if candidate.profile_url and _is_valid_url(candidate.profile_url) and _is_personal_profile_url(candidate.profile_url):
         try:
             profile_http_url = HttpUrl(candidate.profile_url.strip())
         except Exception:

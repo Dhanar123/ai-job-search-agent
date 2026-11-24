@@ -13,7 +13,13 @@ from pydantic import HttpUrl
 from services.candidate_profile import get_llm_client
 from services.alumni.schemas import (
     EducationRecord,
+    RawExtractedCandidate,
     SearchResult,
+)
+from services.alumni.alumni_verifier import (
+    _FALSE_GCT_ORGANIZATIONS,
+    _is_personal_profile_url,
+    _is_valid_person_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -21,23 +27,25 @@ logger = logging.getLogger(__name__)
 _EXTRACTION_SYSTEM_PROMPT = """\
 You are an expert alumni information extraction assistant.
 
-Your task is to extract mentions of people who studied at a specific college AND currently work at a specific company, from web search results (titles, URLs, and snippets).
+Your task is to extract mentions of individual human professionals who studied at Government College of Technology, Coimbatore (GCT) AND currently work at a specific target company, from web search results (titles, URLs, and snippets).
 
 CRITICAL RULES:
-1. Extract facts from titles, URLs, AND snippets. LinkedIn titles often contain the person's name, job title, and company (e.g. "John Doe - Software Engineer - GitLab | LinkedIn").
-2. If the title says "Name - Title at Company" that counts as employment evidence. Quote the full title.
-3. If the snippet or title mentions the college name (or its abbreviation like "GCT"), that counts as education evidence. Quote the relevant part.
-4. Use the search result URL as the source URL for any evidence found in that result.
-5. If a field is not explicitly stated, set it to null.
-6. Extract ALL matching candidates, not just the first one. Look across ALL search results.
-7. The education_quote and employment_quote can come from the SAME search result if both facts appear in it (title + snippet combined).
-8. Return valid JSON only, matching the required schema. No markdown fences or commentary.
+1. ONLY extract individual human people with real personal names. NEVER extract web pages (e.g., Login, FAQs, About), departments, student bodies, community groups, or companies.
+2. The person MUST CURRENTLY work at the target company. If the search result shows they work at a different company (for example, "Sr. Software Engineer @ PayPal" when target is Cloudflare), DO NOT extract them.
+3. The college MUST be Government College of Technology, Coimbatore (Tamil Nadu, India). DO NOT extract candidates from unrelated entities that share the acronym GCT (e.g., GCT Semiconductor, GCT Global Container Terminals, GCT Technologies, or Pakistani colleges like GCT Lahore/Bannu).
+4. If the title says "Name - Title at Company" that counts as employment evidence. Quote the full title.
+5. If the snippet or title mentions the college name (or "GCT Coimbatore"), that counts as education evidence. Quote the relevant part.
+6. Use the search result URL as the source URL for any evidence found in that result. Profile URLs must be individual profiles (e.g., linkedin.com/in/*).
+7. If a field is not explicitly stated, set it to null.
+8. If NO candidates in the search results satisfy both the college and current company criteria, return an empty list {"candidates": []}. Do not guess or hallucinate.
+9. Return valid JSON only, matching the required schema. No markdown fences or commentary.
 """
 
 _EXTRACTION_USER_TEMPLATE = """\
-Extract all people who appear to be alumni of '{college}' (also known as: GCT, GCT Coimbatore, Government College of Technology) AND are connected to company '{company}'.
+Extract people who graduated from '{college}' (Government College of Technology, Coimbatore / GCT) AND currently work at company '{company}'.
 
-Look at EVERY search result below. For each person found, extract their details.
+DO NOT extract individuals working at other employers (e.g. PayPal, Meta, Intuit, Wipro, Walmart).
+DO NOT extract organizations, web pages, or other GCT entities (Semiconductor, Container Terminals).
 
 Search Results:
 {search_results_text}
@@ -65,30 +73,6 @@ JSON Schema required:
 """
 
 
-class RawExtractedCandidate:
-    """Internal container for raw extracted candidate before formal verification."""
-
-    def __init__(
-        self,
-        full_name: str,
-        current_employer: str,
-        designation: str | None = None,
-        profile_url: str | None = None,
-        education: dict[str, Any] | None = None,
-        education_quote: str | None = None,
-        education_source_url: str | None = None,
-        employment_quote: str | None = None,
-        employment_source_url: str | None = None,
-    ) -> None:
-        self.full_name = full_name
-        self.current_employer = current_employer
-        self.designation = designation
-        self.profile_url = profile_url
-        self.education = education or {}
-        self.education_quote = education_quote
-        self.education_source_url = education_source_url
-        self.employment_quote = employment_quote
-        self.employment_source_url = employment_source_url
 
 
 def _fallback_extract_candidates(
@@ -99,14 +83,33 @@ def _fallback_extract_candidates(
     """Rule-based extraction fallback from search snippets when LLM is unavailable or throttled."""
     candidates: list[RawExtractedCandidate] = []
     college_aliases = ["government college of technology", "gct", "gct coimbatore"]
+    clean_company = company_name.strip().lower()
 
     for r in search_results:
         text = f"{r.title} {r.snippet}"
         text_lower = text.lower()
 
+        # Reject false GCT entities (Semiconductor, Container Terminals, etc.)
+        if any(false_org in text_lower for false_org in _FALSE_GCT_ORGANIZATIONS):
+            continue
+
         # Check if college is mentioned
         has_college = any(alias in text_lower for alias in college_aliases)
         if not has_college:
+            continue
+
+        # Check that target company is ACTUALLY mentioned in this search result!
+        # Do not extract candidates for a company if the company name isn't in the snippet/title!
+        if len(clean_company) <= 3:
+            has_company = bool(re.search(rf"\b{re.escape(clean_company)}\b", text_lower))
+        else:
+            has_company = clean_company in text_lower
+
+        if not has_company:
+            continue
+
+        # Reject if URL is not a personal profile
+        if not _is_personal_profile_url(r.url) or "linkedin.com/in" not in r.url:
             continue
 
         # LinkedIn titles typically: "Full Name - Designation - Company | LinkedIn"
@@ -117,18 +120,16 @@ def _fallback_extract_candidates(
         designation = None
         if len(parts) >= 2:
             name = parts[0].strip()
-            # If name looks like a headline or search query instead of a person name, skip
-            if len(name.split()) > 4 or any(w in name.lower() for w in ("job", "career", "hiring", "engineer", "at", "top", "find")):
-                continue
             designation = parts[1].strip()
         elif len(parts) == 1 and 2 <= len(parts[0].split()) <= 4:
             name = parts[0].strip()
 
-        if not name:
+        # Validate that the name is a real human person name
+        if not name or not _is_valid_person_name(name):
             continue
 
         edu_quote = r.snippet if any(a in r.snippet.lower() for a in college_aliases) else r.title
-        emp_quote = r.title if company_name.lower() in r.title.lower() else r.snippet
+        emp_quote = r.title if clean_company in r.title.lower() else r.snippet
 
         candidates.append(
             RawExtractedCandidate(
@@ -247,10 +248,6 @@ def extract_alumni_from_search_results(
                 len(extracted),
                 company_name,
             )
-            if not extracted and search_results:
-                fallback_res = _fallback_extract_candidates(search_results, company_name, college_name)
-                if fallback_res:
-                    return fallback_res
             return extracted
 
         except json.JSONDecodeError as err:

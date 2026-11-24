@@ -12,19 +12,130 @@ from services.alumni.schemas import CompanyRecord
 
 logger = logging.getLogger(__name__)
 
-# Common non-informative or placeholder company names to ignore
-_PLACEHOLDER_NAMES = {
+# Known job boards, aggregators, staffing portals, and learning platforms to reject
+_JOB_BOARDS_AND_PORTALS = {
+    "indeed",
+    "linkedin",
+    "glassdoor",
+    "naukri",
+    "michaelpage",
+    "michael page",
+    "builtin",
+    "nextleap",
+    "foundit",
+    "instahyre",
+    "shine",
+    "monster",
+    "timesjobs",
+    "hirist",
+    "wellfound",
+    "angel",
+    "angellist",
+    "workday",
+    "greenhouse",
+    "lever",
+    "ashby",
+    "ziprecruiter",
+    "simplyhired",
+    "dice",
+    "careerbuilder",
+    "unstop",
+    "jobrapido",
+    "jooble",
+    "adzuna",
+    "grabjobs",
+    "internshala",
+    "cuvette",
+    "apna",
+    "workindia",
+}
+
+# Common non-informative, generic words or placeholder company names to ignore
+_INVALID_COMPANY_NAMES = {
     "",
     "unknown",
     "n/a",
     "na",
     "none",
+    "null",
     "confidential",
     "stealth",
     "stealth startup",
     "private",
     "undisclosed",
+    "tech company",
+    "company",
+    "various",
+    "multiple",
+    "hiring",
+    "careers",
+    "jobs",
+    "job openings",
+    "recruitment",
+    "batch",
+    "freshers",
+    "internship",
+    "intern",
+    "contract",
+    "full time",
+    "remote",
+    "hybrid",
+    "onsite",
+    "in",
+    "at",
+    "to",
+    "by",
+    "on",
+    "or",
+    "us",
+    "uk",
+    "ca",
+    "de",
+    "fr",
+    "it",
+    "jp",
+    "au",
+    "eu",
+    "as",
+    "is",
+    "an",
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "of",
+    "all",
 }
+
+
+def is_valid_company_name(name: str) -> bool:
+    """Validate whether an extracted string represents a plausible hiring company."""
+    if not name or not isinstance(name, str):
+        return False
+    clean = name.strip()
+    if len(clean) < 2:
+        return False
+
+    clean_lower = clean.lower()
+
+    # Reject pure numbers or years (e.g. "2024", "2027")
+    if clean.isdigit():
+        return False
+
+    # Reject placeholders, stopwords, country codes
+    if clean_lower in _INVALID_COMPANY_NAMES:
+        return False
+
+    # Reject job portals / aggregators
+    if clean_lower in _JOB_BOARDS_AND_PORTALS:
+        return False
+
+    # Reject URLs and domain-like strings
+    if any(domain_part in clean_lower for domain_part in (".com", ".org", ".net", ".io", ".co", ".in", ".dz", "http:", "https:", "www.")):
+        return False
+
+    return True
 
 
 def extract_companies(job_results: Iterable[Any]) -> list[CompanyRecord]:
@@ -67,7 +178,7 @@ def extract_companies(job_results: Iterable[Any]) -> list[CompanyRecord]:
             source = str(getattr(job_obj, "source", "") or "")
 
         name = raw_name.strip()
-        if not name or name.lower() in _PLACEHOLDER_NAMES:
+        if not is_valid_company_name(name):
             continue
 
         if name not in records_by_name:
