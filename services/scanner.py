@@ -17,7 +17,7 @@ from typing import Any, Callable, Coroutine
 from pydantic import BaseModel, Field
 
 from providers.base import JobPosting
-from providers import ashby, greenhouse, lever, rss
+from providers import ashby, greenhouse, google_jobs, lever, rss
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,8 @@ __all__ = ["JobPosting", "ProviderConfig", "ScanConfig", "scan_all_providers"]
 class ProviderConfig(BaseModel):
     """Configuration for a single provider source."""
 
-    provider: str               # "greenhouse" | "lever" | "ashby" | "rss"
-    identifier: str             # board token, slug, or feed URL
+    provider: str               # "greenhouse" | "lever" | "ashby" | "rss" | "google_jobs"
+    identifier: str             # board token, slug, feed URL, or query string
 
 
 class ScanConfig(BaseModel):
@@ -54,6 +54,7 @@ _PROVIDER_MAP: dict[
     "lever": lever.fetch_jobs,
     "ashby": ashby.fetch_jobs,
     "rss": rss.fetch_jobs,
+    "google_jobs": google_jobs.fetch_jobs,
 }
 
 
