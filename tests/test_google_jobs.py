@@ -72,11 +72,51 @@ def test_extract_company_and_role():
     comp3, role3 = _extract_company_and_role("Backend Engineer - Swiggy", "", "https://swiggy.com")
     assert "Swiggy" in comp3
 
+    # Company - Role - Location format (where Company comes first)
+    comp4, role4 = _extract_company_and_role("Infosys Careers - Systems Engineer - Bangalore", "", "https://careers.infosys.com/job/123")
+    assert comp4 == "Infosys"
+    assert "Systems Engineer" in role4
+
+    comp5, role5 = _extract_company_and_role("TCS - Software Engineer - Chennai", "", "https://ibegin.tcs.com/jobs/123")
+    assert comp5 == "TCS"
+    assert "Software Engineer" in role5
+
+    # LinkedIn standard format: Company hiring Role in Location
+    comp6, role6 = _extract_company_and_role("PhonePe hiring Software Engineer in Bengaluru, Karnataka, India | LinkedIn", "", "https://www.linkedin.com/jobs/view/12345")
+    assert comp6 == "PhonePe"
+    assert "Software Engineer" in role6
+
 
 @pytest.mark.asyncio
 async def test_google_jobs_empty_query():
     res = await fetch_jobs("")
     assert res == []
+
+
+@pytest.mark.asyncio
+async def test_google_jobs_comma_separated_queries(monkeypatch):
+    sample_serper = {
+        "organic": [
+            {
+                "title": "Software Engineer at Zoho Corporation",
+                "link": "https://careers.zohocorp.com/jobs/123",
+                "snippet": "Join Zoho Corporation as a Software Engineer in Chennai."
+            }
+        ]
+    }
+
+    class MockTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            if "serper.dev" in str(request.url):
+                return httpx.Response(200, json=sample_serper)
+            return httpx.Response(200, json={"data": []})
+
+    orig_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: orig_client(transport=MockTransport()))
+
+    results = await fetch_jobs("Software Engineer India, Software Engineer Bangalore", api_key="test_key")
+    assert len(results) >= 1
+    assert any(r.company == "Zoho Corporation" for r in results)
 
 
 @pytest.mark.asyncio

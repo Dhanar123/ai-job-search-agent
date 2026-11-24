@@ -50,13 +50,19 @@ def _is_aggregator_directory_page(title: str, url: str) -> bool:
     t = title.strip().lower()
 
     # 1. Platform-specific directory / search page URL rules
-    # On LinkedIn: ONLY /jobs/view/ is an individual job; everything else is directory/search
-    if "linkedin.com/jobs" in u and "/jobs/view/" not in u:
-        return True
+    # On LinkedIn: /jobs/view is an individual job; everything else under /jobs is directory/search
+    if "linkedin.com" in u:
+        if "/jobs/view" in u:
+            pass
+        elif any(p in u for p in ("/jobs", "/jobs-in", "/search", "/feed", "/pulse")):
+            return True
 
-    # On Indeed: ONLY /viewjob or /rc/clk is an individual job
-    if "indeed.com" in u and "/viewjob" not in u and "/rc/clk" not in u:
-        return True
+    # On Indeed: /viewjob and /rc/clk are individual jobs; everything else is directory/search
+    if "indeed.com" in u:
+        if "/viewjob" in u or "/rc/clk" in u:
+            pass
+        elif any(p in u for p in ("/jobs", "/q-", "/cmp/", "/browsejobs", "/m/")):
+            return True
 
     # Other aggregator directory / search URL patterns
     if any(
@@ -75,26 +81,27 @@ def _is_aggregator_directory_page(title: str, url: str) -> bool:
             "/articles/",
             "glassdoor.com/job/",
             "glassdoor.com/jobs/",
-            "michaelpage.co.in/jobs",
-            "builtin.com/jobs",
+            "michaelpage.co.in",
+            "builtin.com",
             "nextleap.app",
             "foundit.in/s/",
             "shine.com/job-search",
+            "ambitionbox.com",
         )
     ):
         return True
 
     # 2. Titles indicating batch vacancies or search directory listings
     # e.g., "23000 Software Engineer Job Vacancies", "11000+ Open Roles", "15,892 jobs", "350+ openings"
-    if re.search(r"\d{2,}\+?\s+(?:open\s+)?(?:vacancies|openings|roles|jobs)\b", t):
+    if re.search(r"\b\d{2,}\+?\s+(?:open\s+)?(?:vacancies|openings|roles|jobs)\b", t):
         return True
 
     # e.g., "Best Software Engineer Jobs in India 2026", "Top 10 Jobs"
-    if re.search(r"\b(?:best|top|\d{4})\s+.*jobs\b", t):
+    if re.search(r"\b(?:best|top\s+\d+)\s+.*jobs\b", t):
         return True
 
     # e.g., "Software Engineer Jobs in India - 2027 Batch"
-    if re.search(r"\bjobs\s+in\s+.*batch\b", t):
+    if re.search(r"\bjobs\s+in\s+.*\b(?:batch|graduates)\b", t):
         return True
 
     # e.g., "15,892 Software engineer jobs in India"
@@ -115,6 +122,32 @@ def _is_aggregator_directory_page(title: str, url: str) -> bool:
         return True
 
     return False
+
+
+_ROLE_INDICATORS = {
+    "engineer", "developer", "analyst", "manager", "lead", "architect",
+    "intern", "specialist", "consultant", "designer", "scientist", "associate",
+    "officer", "executive", "administrator", "programmer", "tester", "qa",
+    "devops", "sde", "swe", "fullstack", "frontend", "backend", "data",
+    "trainee", "fresher",
+}
+
+
+def _is_role_title(text: str) -> bool:
+    """Check if a string contains common job role tokens."""
+    tokens = set(re.findall(r"[a-zA-Z]+", text.lower()))
+    return bool(tokens & _ROLE_INDICATORS)
+
+
+def _clean_company_candidate(name: str) -> str:
+    """Clean common suffix noise from candidate company string."""
+    cleaned = re.sub(
+        r"\b(careers?|jobs?|job openings?|recruitment|india|usa|hiring|remote|in\s+.*)\b",
+        "",
+        name,
+        flags=re.IGNORECASE,
+    ).strip()
+    return cleaned
 
 
 def _extract_company_and_role(raw_title: str, snippet: str, link: str) -> tuple[str, str]:
@@ -174,7 +207,7 @@ def _extract_company_and_role(raw_title: str, snippet: str, link: str) -> tuple[
     # Pattern: "Company hiring Role in Location" (common on LinkedIn job views)
     m_hiring_in = re.search(r"^(.*?)\s+hiring\s+(.*?)(?:\s+in\s+.*)?$", title, re.IGNORECASE)
     if m_hiring_in:
-        cand_comp = m_hiring_in.group(1).strip()
+        cand_comp = _clean_company_candidate(m_hiring_in.group(1).strip())
         cand_role = m_hiring_in.group(2).strip()
         if is_valid_company_name(cand_comp):
             return cand_comp, cand_role
@@ -182,29 +215,51 @@ def _extract_company_and_role(raw_title: str, snippet: str, link: str) -> tuple[
     # Pattern: "Role at Company" or "Role @ Company"
     m_at = re.search(r"^(.*?)\s+(?:at|@)\s+(.*?)(?:\s*[-–|•:]\s*.*)?$", title, re.IGNORECASE)
     if m_at:
-        cand_comp = m_at.group(2).strip()
         cand_role = m_at.group(1).strip()
+        cand_comp = _clean_company_candidate(m_at.group(2).strip())
         if is_valid_company_name(cand_comp):
             return cand_comp, cand_role
 
-    # Pattern: "Role - Company - Location" or "Role | Company"
-    parts = re.split(r"\s*[-–|•]\s*", title)
+    # Pattern: "Role - Company" OR "Company - Role" OR "Company: Role"
+    parts = [p.strip() for p in re.split(r"\s*[-–|•:]\s*", title) if p.strip()]
     if len(parts) >= 2:
-        candidate_role = parts[0].strip()
-        candidate_company = parts[1].strip()
-        candidate_company = re.sub(
-            r"\b(careers?|jobs?|job openings?|recruitment|india|usa|hiring|remote|in\s+.*)\b",
-            "",
-            candidate_company,
-            flags=re.IGNORECASE,
-        ).strip()
-        if is_valid_company_name(candidate_company):
-            return candidate_company, candidate_role
+        p0, p1 = parts[0], parts[1]
+        p0_is_role = _is_role_title(p0)
+        p1_is_role = _is_role_title(p1)
 
-    # Check snippet for company hints: "at Company"
+        if p0_is_role and not p1_is_role:
+            c = _clean_company_candidate(p1)
+            if is_valid_company_name(c):
+                return c, p0
+        elif p1_is_role and not p0_is_role:
+            c = _clean_company_candidate(p0)
+            if is_valid_company_name(c):
+                return c, p1
+        else:
+            # Check if one part matches the domain name in netloc
+            clean_netloc_base = re.sub(r"^(?:www\.|careers\.|jobs\.|apply\.|boards\.)", "", netloc).split(".")[0]
+            if clean_netloc_base and len(clean_netloc_base) > 2:
+                if clean_netloc_base in p0.lower():
+                    c = _clean_company_candidate(p0)
+                    if is_valid_company_name(c):
+                        return c, p1
+                elif clean_netloc_base in p1.lower():
+                    c = _clean_company_candidate(p1)
+                    if is_valid_company_name(c):
+                        return c, p0
+
+            # Default fallback between p1 and p0
+            c1 = _clean_company_candidate(p1)
+            if is_valid_company_name(c1):
+                return c1, p0
+            c0 = _clean_company_candidate(p0)
+            if is_valid_company_name(c0):
+                return c0, p1
+
+    # Check snippet for company hints: "at Company" or "Company is hiring"
     m_snip_at = re.search(r"\b(?:at|@)\s+([A-Za-z0-9&.\s]{2,30})\b", snippet, re.IGNORECASE)
     if m_snip_at:
-        cand_comp = m_snip_at.group(1).strip()
+        cand_comp = _clean_company_candidate(m_snip_at.group(1).strip())
         if is_valid_company_name(cand_comp):
             return cand_comp, title
 
@@ -244,11 +299,11 @@ async def _fetch_serper_search_jobs(
     # Search queries specifically targeted to individual job listings rather than aggregate directories
     search_queries = [
         # Query 1: Direct ATS listings (startups, mid-tech, enterprise)
-        f'(site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:myworkdayjobs.com OR site:smartrecruiters.com) "{clean_q}"',
-        # Query 2: Direct individual job postings on LinkedIn and Indeed (viewjob/jobs/view)
-        f'(site:linkedin.com/jobs/view OR site:indeed.com/viewjob) "{clean_q}"',
-        # Query 3: Careers portals excluding directory listing URLs
-        f'"{clean_q}" intitle:"job opening" OR intitle:"careers" -site:indeed.com/jobs -site:linkedin.com/jobs/search -site:glassdoor.com/Job -site:builtin.com/jobs -site:michaelpage.co.in',
+        f'(site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:myworkdayjobs.com OR site:smartrecruiters.com) {clean_q}',
+        # Query 2: Direct individual job postings on LinkedIn and Indeed
+        f'(site:linkedin.com/jobs OR site:indeed.com) {clean_q} "apply"',
+        # Query 3: Careers portals across all companies (Zoho, TCS, Infosys, Swiggy, startups) excluding aggregator domains
+        f'{clean_q} (intitle:careers OR intitle:hiring OR intitle:job) -site:glassdoor.com -site:builtin.com -site:michaelpage.co.in -site:foundit.in -site:shine.com -site:ambitionbox.com',
     ]
 
     payloads: list[dict[str, Any]] = []
@@ -257,7 +312,7 @@ async def _fetch_serper_search_jobs(
             "q": sq,
             "num": 20,
         }
-        indian_locations = ("india", "bangalore", "bengaluru", "chennai", "coimbatore", "hyderabad", "pune", "mumbai", "delhi", "noida")
+        indian_locations = ("india", "bangalore", "bengaluru", "chennai", "coimbatore", "hyderabad", "pune", "mumbai", "delhi", "noida", "gurgaon")
         if any(loc in q_lower for loc in indian_locations):
             payload["gl"] = "in"
             payload["hl"] = "en"
@@ -328,7 +383,7 @@ async def _fetch_arbeitnow_jobs(
         data = resp.json()
         raw_jobs = data.get("data", [])
         clean_q = re.sub(r'["\']', '', query).lower()
-        q_tokens = [t for t in clean_q.split() if len(t) > 2 and t not in ("jobs", "hiring", "careers", "india")]
+        q_tokens = [t.strip(",. ") for t in clean_q.split() if len(t.strip(",. ")) > 2 and t.strip(",. ") not in ("jobs", "hiring", "careers", "india")]
 
         results: list[JobPosting] = []
         for j in raw_jobs:
@@ -375,24 +430,31 @@ async def fetch_jobs(
 ) -> list[JobPosting]:
     """Fetch jobs from open web search (Serper and public aggregators).
 
+    Supports comma-separated queries (e.g. 'Software Engineer India, Software Engineer Bangalore').
+
     Args:
-        query_or_location: Search keywords / location (e.g. "Software Engineer India").
+        query_or_location: Search keywords / location.
         api_key: Optional Serper API key.
 
     Returns:
         List of standardized JobPosting models across diverse companies.
     """
-    q = query_or_location.strip()
-    if not q:
+    raw_input = query_or_location.strip()
+    if not raw_input:
         return []
+
+    sub_queries = [s.strip() for s in raw_input.split(",") if s.strip()]
+    if not sub_queries:
+        sub_queries = [raw_input]
 
     resolved_key = api_key or _get_serper_key()
 
     async with httpx.AsyncClient(timeout=_TIMEOUT, trust_env=False) as client:
         tasks = []
-        if resolved_key:
-            tasks.append(_fetch_serper_search_jobs(q, resolved_key, client))
-        tasks.append(_fetch_arbeitnow_jobs(q, client))
+        for q in sub_queries:
+            if resolved_key:
+                tasks.append(_fetch_serper_search_jobs(q, resolved_key, client))
+            tasks.append(_fetch_arbeitnow_jobs(q, client))
 
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -406,5 +468,5 @@ async def fetch_jobs(
                     seen_urls.add(job.url)
                     combined_jobs.append(job)
 
-    logger.info("Open Web/Google Jobs: Total %d jobs retrieved across companies for '%s'.", len(combined_jobs), q)
+    logger.info("Open Web/Google Jobs: Total %d jobs retrieved across companies for '%s'.", len(combined_jobs), raw_input)
     return combined_jobs
