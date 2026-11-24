@@ -91,6 +91,63 @@ class RawExtractedCandidate:
         self.employment_source_url = employment_source_url
 
 
+def _fallback_extract_candidates(
+    search_results: list[SearchResult],
+    company_name: str,
+    college_name: str,
+) -> list[RawExtractedCandidate]:
+    """Rule-based extraction fallback from search snippets when LLM is unavailable or throttled."""
+    candidates: list[RawExtractedCandidate] = []
+    college_aliases = ["government college of technology", "gct", "gct coimbatore"]
+
+    for r in search_results:
+        text = f"{r.title} {r.snippet}"
+        text_lower = text.lower()
+
+        # Check if college is mentioned
+        has_college = any(alias in text_lower for alias in college_aliases)
+        if not has_college:
+            continue
+
+        # LinkedIn titles typically: "Full Name - Designation - Company | LinkedIn"
+        title_clean = re.sub(r"\s*\|\s*LinkedIn\b.*$", "", r.title, flags=re.IGNORECASE).strip()
+        parts = re.split(r"\s*[-–•]\s*", title_clean)
+
+        name = ""
+        designation = None
+        if len(parts) >= 2:
+            name = parts[0].strip()
+            # If name looks like a headline or search query instead of a person name, skip
+            if len(name.split()) > 4 or any(w in name.lower() for w in ("job", "career", "hiring", "engineer", "at", "top", "find")):
+                continue
+            designation = parts[1].strip()
+        elif len(parts) == 1 and 2 <= len(parts[0].split()) <= 4:
+            name = parts[0].strip()
+
+        if not name:
+            continue
+
+        edu_quote = r.snippet if any(a in r.snippet.lower() for a in college_aliases) else r.title
+        emp_quote = r.title if company_name.lower() in r.title.lower() else r.snippet
+
+        candidates.append(
+            RawExtractedCandidate(
+                full_name=name,
+                current_employer=company_name,
+                designation=designation,
+                profile_url=r.url if "linkedin.com/in" in r.url else None,
+                education={"institution": college_name},
+                education_quote=edu_quote.strip(),
+                education_source_url=r.url,
+                employment_quote=emp_quote.strip(),
+                employment_source_url=r.url,
+            )
+        )
+
+    logger.info("Rule-based fallback extracted %d candidate(s) for '%s'.", len(candidates), company_name)
+    return candidates
+
+
 def _clean_json_response(raw_text: str) -> str:
     """Strip markdown backticks and whitespace from an LLM response."""
     text = raw_text.strip()
@@ -190,6 +247,10 @@ def extract_alumni_from_search_results(
                 len(extracted),
                 company_name,
             )
+            if not extracted and search_results:
+                fallback_res = _fallback_extract_candidates(search_results, company_name, college_name)
+                if fallback_res:
+                    return fallback_res
             return extracted
 
         except json.JSONDecodeError as err:
@@ -199,10 +260,9 @@ def extract_alumni_from_search_results(
                 err,
             )
             if attempt == 1:
-                logger.error("Dropping batch for '%s' due to invalid JSON.", company_name)
-                return []
+                return _fallback_extract_candidates(search_results, company_name, college_name)
         except Exception as err:
-            logger.error("LLM extraction call failed for '%s': %s", company_name, err)
-            return []
+            logger.warning("LLM extraction call failed for '%s' (%s). Using fallback extractor.", company_name, err)
+            return _fallback_extract_candidates(search_results, company_name, college_name)
 
-    return []
+    return _fallback_extract_candidates(search_results, company_name, college_name)
