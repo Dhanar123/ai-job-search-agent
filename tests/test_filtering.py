@@ -481,6 +481,34 @@ def test_schema_and_pipeline() -> None:
     _report("Acme has salary in unknown_fields", "salary" in acme_job.unknown_fields)
 
 
+def test_smart_role_location_token_matching() -> None:
+    print("\n--- Smart Role & Location Token Matching ---")
+    j = JobPosting(
+        title="Software Engineer",
+        company="Razorpay",
+        location="Bengaluru, India",
+        url="https://example.com/rzp",
+        source="test",
+    )
+    crit = FilterCriteria(preferred_roles=["Software Engineer India"], keywords=["Software Engineer India"])
+    eligible, rejected = filter_jobs_with_report([j], crit)
+    _report("Software Engineer matches role target with embedded location", any(job.url == j.url for job in eligible))
+
+
+def test_city_aliases_matching() -> None:
+    print("\n--- City Aliases Matching ---")
+    j_bengaluru = JobPosting(
+        title="Software Engineer",
+        company="Razorpay",
+        location="Bengaluru, India",
+        url="https://example.com/bengaluru",
+        source="test",
+    )
+    crit_bangalore = FilterCriteria(locations=["Bangalore"], remote_only=False)
+    eligible, rejected = filter_jobs_with_report([j_bengaluru], crit_bangalore)
+    _report("Bangalore matches Bengaluru via alias", any(job.url == j_bengaluru.url for job in eligible))
+
+
 # ── Runner ──────────────────────────────────────────────────────────
 
 
@@ -495,6 +523,8 @@ def main() -> None:
     test_excluded_keywords()
     test_location_and_remote_filtering()
     test_preferred_locations()
+    test_smart_role_location_token_matching()
+    test_city_aliases_matching()
     test_salary_filtering()
     test_experience_filtering()
     test_job_type_filtering()
