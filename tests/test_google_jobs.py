@@ -5,10 +5,11 @@ from __future__ import annotations
 import pytest
 import httpx
 
-from providers.base import JobPosting
+from providers.base import JobPosting, ProviderError
 from providers.google_jobs import (
     fetch_jobs,
     _extract_company_and_role,
+    _extract_location_hint,
     _is_aggregator_directory_page,
 )
 
@@ -159,3 +160,36 @@ async def test_google_jobs_parsing(monkeypatch):
     companies = [r.company for r in results]
     assert "Zoho Corporation" in companies
     assert "TechStart Inc" in companies
+
+
+@pytest.mark.asyncio
+async def test_google_jobs_missing_api_key(monkeypatch):
+    monkeypatch.delenv("SERPER_API_KEY", raising=False)
+    monkeypatch.delenv("SERP_API_KEY", raising=False)
+    monkeypatch.delenv("SERPAPI_API_KEY", raising=False)
+    monkeypatch.delenv("SERPAPI_KEY", raising=False)
+    with pytest.raises(ProviderError, match="Serper API key not configured"):
+        await fetch_jobs("Software Engineer India", api_key=None)
+
+
+@pytest.mark.asyncio
+async def test_google_jobs_unauthorized_key(monkeypatch):
+    class Mock401Transport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            if "serper.dev" in str(request.url):
+                return httpx.Response(401, json={"message": "Unauthorized"})
+            return httpx.Response(200, json={"data": []})
+
+    orig_client = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: orig_client(transport=Mock401Transport()))
+
+    with pytest.raises(ProviderError, match="Invalid or unauthorized Serper API key"):
+        await fetch_jobs("Software Engineer India", api_key="invalid_key")
+
+
+def test_extract_location_hint():
+    assert _extract_location_hint("Software Engineer - Bengaluru", "", "Software Engineer") == "Bengaluru"
+    assert _extract_location_hint("Backend Dev", "Join us in Chennai", "Software Engineer") == "Chennai"
+    assert _extract_location_hint("Fullstack Engineer", "", "Software Engineer Bangalore") == "Bangalore"
+    assert _extract_location_hint("DevOps Engineer", "", "Software Engineer") == "India"
+
