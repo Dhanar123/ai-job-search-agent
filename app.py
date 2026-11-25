@@ -372,29 +372,6 @@ with st.sidebar:
     elif has_openai:
         st.info("🟢 **OpenAI Active**")
         selected_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-    else:
-        st.warning("⚠️ No AI API Key in `.env`")
-        groq_input = st.text_input("Enter Groq API Key:", type="password")
-        if groq_input:
-            os.environ["GROQ_API_KEY"] = groq_input.strip()
-            st.rerun()
-
-    # Serper API Key (for Google Jobs open web search & GCT Alumni Search)
-    serper_val = _get_secret("SERPER_API_KEY")
-    if serper_val:
-        st.success("🌐 **Serper API Active (Google Jobs & Alumni)**")
-        with st.expander("Update Serper Key", expanded=False):
-            serper_new = st.text_input("Serper API Key:", value=serper_val, type="password", key="serper_key_edit")
-            if serper_new and serper_new.strip() != serper_val:
-                os.environ["SERPER_API_KEY"] = serper_new.strip()
-                st.rerun()
-    else:
-        st.warning("⚠️ **No Serper Key in `.env`**")
-        st.caption("Required for Google Jobs open web search & GCT Alumni finding. [Get free key at serper.dev](https://serper.dev).")
-        serper_input = st.text_input("Enter Serper API Key:", type="password", key="serper_key_init")
-        if serper_input:
-            os.environ["SERPER_API_KEY"] = serper_input.strip()
-            st.rerun()
 
     st.markdown("---")
 
@@ -446,7 +423,7 @@ with st.sidebar:
     # ── Google Jobs Open Web Search ──
     include_google_jobs = st.checkbox(
         "🌍 Google Jobs (Open Web - Startups, Mid-Tech & Service MNCs)",
-        value=True,
+        value=False,
         help="Searches jobs from all companies (Zoho, TCS, Infosys, startups, etc.) via Serper Google Jobs API without needing individual board tokens.",
     )
     google_jobs_query = st.text_input(
@@ -455,37 +432,35 @@ with st.sidebar:
         help="Search query for Google Jobs (e.g. 'Software Engineer India', 'Python Developer Coimbatore', 'Backend Engineer Remote')",
         disabled=not include_google_jobs,
     )
-    if include_google_jobs and not _get_secret("SERPER_API_KEY"):
-        st.caption("⚠️ *Serper API Key required. Enter your key in Section 1 above or set in `.env`.*")
 
     st.markdown("---")
-    st.caption("**Specific ATS Boards (Optional):** Enter comma-separated tokens.")
+    st.caption("**Specific ATS Boards:** Enter comma-separated tokens.")
 
-    include_gh = st.checkbox("Greenhouse", value=True, help="Companies like GitLab, Stripe, Figma, Airbnb, Postman, Cloudflare, etc.")
+    include_gh = st.checkbox("Greenhouse", value=True, help="Companies like Cloudflare, Stripe, MongoDB, Datadog, Figma, Airbnb, etc.")
     gh_board = st.text_input(
         "Greenhouse Board(s)",
-        value="razorpay, postman, cloudflare, stripe",
-        help="Enter one or more comma-separated tokens (e.g. razorpay, postman, cloudflare, stripe, groww)",
+        value="cloudflare, stripe, mongodb, datadog, elastic, samsara, brex, gitlab, coinbase, rubrik, affirm, airbnb, pinterest, robinhood, reddit, figma, twilio, instacart, inmobi",
+        help="Enter one or more comma-separated tokens",
         disabled=not include_gh,
     )
 
-    include_lever = st.checkbox("Lever", value=True, help="Companies like Spotify, Canva, Datadog, etc.")
-    lever_company = st.text_input(
-        "Lever Slug(s)",
-        value="canva, spotify",
-        help="Enter one or more comma-separated slugs (e.g. canva, spotify, datadog)",
-        disabled=not include_lever,
-    )
-
-    include_ashby = st.checkbox("Ashby", value=False, help="Companies like OpenAI, Ramp, Linear, Replit, etc.")
+    include_ashby = st.checkbox("Ashby", value=True, help="Companies like OpenAI, Ramp, Perplexity, Linear, Sentry, etc.")
     ashby_board = st.text_input(
         "Ashby Board(s)",
-        value="ramp, Ashby",
-        help="Enter one or more comma-separated slugs (e.g. ramp, linear, Ashby)",
+        value="openai, ramp, perplexity, ashby, sentry, replit, linear, synthesia, posthog",
+        help="Enter one or more comma-separated slugs",
         disabled=not include_ashby,
     )
 
-    include_rss = st.checkbox("RSS Job Feed", value=False, help="Aggregator feeds containing jobs from top tech companies")
+    include_lever = st.checkbox("Lever", value=True, help="Companies like Palantir, Spotify, etc.")
+    lever_company = st.text_input(
+        "Lever Slug(s)",
+        value="palantir, spotify",
+        help="Enter one or more comma-separated slugs",
+        disabled=not include_lever,
+    )
+
+    include_rss = st.checkbox("RSS Job Feed", value=True, help="Aggregator feeds containing verified remote programming jobs")
     rss_feed = st.text_input(
         "RSS URL(s)",
         value="https://weworkremotely.com/categories/remote-programming-jobs.rss",
