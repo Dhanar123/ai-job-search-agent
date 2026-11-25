@@ -6,6 +6,7 @@ Extracts unique company records from validated job search results.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Iterable
 
 from services.alumni.schemas import CompanyRecord
@@ -144,6 +145,21 @@ def is_valid_company_name(name: str) -> bool:
         "specialist", "administrator", "programmer", "designer", "scientist",
     }
     if tokens and tokens.issubset(role_words):
+        return False
+
+    # Reject strings that are purely geographical/location names (e.g. "Bengaluru, Karnataka", "India")
+    loc_tokens = set(re.findall(r"[a-z]+", clean_lower))
+    location_words = {
+        "india", "bangalore", "bengaluru", "chennai", "hyderabad", "pune",
+        "mumbai", "delhi", "noida", "gurgaon", "gurugram", "coimbatore",
+        "karnataka", "tamil", "nadu", "maharashtra", "telangana", "haryana",
+        "remote", "hybrid", "onsite", "office", "united", "states", "usa", "uk",
+    }
+    if loc_tokens and loc_tokens.issubset(location_words):
+        return False
+
+    # Reject strings containing experience duration or job counts (e.g. "4 Years", "2-4 Yrs", "2 Positions")
+    if re.search(r"\d+\s*[-–+]?\s*\d*\s*(?:years?|yrs?|exp|positions?|openings?)\b", clean_lower):
         return False
 
     return True

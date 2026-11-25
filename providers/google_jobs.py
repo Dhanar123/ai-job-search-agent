@@ -263,21 +263,46 @@ def _extract_company_and_role(raw_title: str, snippet: str, link: str) -> tuple[
         if is_valid_company_name(cand_comp):
             return cand_comp, title
 
+    m_snip_hiring = re.search(r"\b([A-Z][A-Za-z0-9&.]{1,25})\s+is\s+hiring\b", snippet)
+    if m_snip_hiring:
+        cand_comp = _clean_company_candidate(m_snip_hiring.group(1).strip())
+        if is_valid_company_name(cand_comp):
+            return cand_comp, title
+
+    m_snip_join = re.search(r"\b(?:join|explore roles at|careers at)\s+([A-Z][A-Za-z0-9&.]{1,25})\b", snippet, re.IGNORECASE)
+    if m_snip_join:
+        cand_comp = _clean_company_candidate(m_snip_join.group(1).strip())
+        if is_valid_company_name(cand_comp):
+            return cand_comp, title
+
     # Fallback to extracting domain name from link ONLY IF not an aggregator/portal
     try:
         clean_netloc = re.sub(r"^(?:www\.|careers\.|jobs\.|apply\.|boards\.)", "", netloc)
-        parts = clean_netloc.split(".")
-        if len(parts) >= 3 and len(parts[0]) == 2:
-            base_name = parts[1].capitalize()
-        else:
-            base_name = parts[0].capitalize()
+        parts = [p for p in clean_netloc.split(".") if p not in ("ibegin", "apply", "careers", "jobs", "job", "work", "portal", "myworkday", "wd3", "wd5", "www")]
+        if parts:
+            if len(parts) >= 3 and len(parts[0]) == 2:
+                base_name = parts[1].capitalize()
+            else:
+                base_name = parts[0].capitalize()
 
-        if base_name and is_valid_company_name(base_name):
-            return base_name, title
+            if base_name and is_valid_company_name(base_name):
+                return base_name, title
     except Exception:
         pass
 
     return "", title
+
+
+def _extract_location_hint(title: str, snippet: str, default: str) -> str:
+    """Extract location name from title, snippet, or query string."""
+    combined = f"{title} {snippet}".lower()
+    for loc_name in ("Bengaluru", "Bangalore", "Hyderabad", "Pune", "Mumbai", "Chennai", "Coimbatore", "Delhi", "Noida", "Gurugram", "Gurgaon", "Remote", "India"):
+        if loc_name.lower() in combined:
+            return loc_name
+    for loc_name in ("Bengaluru", "Bangalore", "Hyderabad", "Pune", "Mumbai", "Chennai", "Coimbatore", "Delhi", "Noida", "Gurugram", "Gurgaon", "Remote", "India"):
+        if loc_name.lower() in default.lower():
+            return loc_name
+    return "India"
 
 
 async def _fetch_serper_search_jobs(
@@ -299,11 +324,11 @@ async def _fetch_serper_search_jobs(
     # Search queries specifically targeted to individual job listings rather than aggregate directories
     search_queries = [
         # Query 1: Direct ATS listings (startups, mid-tech, enterprise)
-        f'(site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:myworkdayjobs.com OR site:smartrecruiters.com) {clean_q}',
-        # Query 2: Direct individual job postings on LinkedIn and Indeed
-        f'(site:linkedin.com/jobs OR site:indeed.com) {clean_q} "apply"',
-        # Query 3: Careers portals across all companies (Zoho, TCS, Infosys, Swiggy, startups) excluding aggregator domains
-        f'{clean_q} (intitle:careers OR intitle:hiring OR intitle:job) -site:glassdoor.com -site:builtin.com -site:michaelpage.co.in -site:foundit.in -site:shine.com -site:ambitionbox.com',
+        f'(site:greenhouse.io OR site:lever.co OR site:ashbyhq.com OR site:myworkdayjobs.com OR site:smartrecruiters.com) {clean_q} "apply"',
+        # Query 2: Direct company careers portals excluding aggregate boards
+        f'"{clean_q}" ("careers" OR "jobs") "apply" -site:linkedin.com -site:indeed.com -site:glassdoor.com -site:naukri.com -site:foundit.in -site:shine.com -site:builtin.com -site:michaelpage.co.in',
+        # Query 3: Open web flexible search
+        f'{clean_q} "apply" ("hiring" OR "careers") -site:glassdoor.com -site:builtin.com -site:michaelpage.co.in -site:foundit.in',
     ]
 
     payloads: list[dict[str, Any]] = []
@@ -318,17 +343,27 @@ async def _fetch_serper_search_jobs(
             payload["hl"] = "en"
         payloads.append(payload)
 
+    status_errors: list[int] = []
+
     async def _post_query(p: dict[str, Any]) -> list[dict[str, Any]]:
         try:
             resp = await client.post(_SERPER_SEARCH_URL, headers=headers, json=p, timeout=_TIMEOUT)
             if resp.status_code == 200:
                 return resp.json().get("organic", [])
-            logger.warning("Serper query '%s' returned status %d", p.get("q"), resp.status_code)
+            status_errors.append(resp.status_code)
+            logger.warning("Serper query '%s' returned status %d: %s", p.get("q"), resp.status_code, resp.text[:200])
         except Exception as exc:
             logger.debug("Serper post error: %s", exc)
         return []
 
     query_results = await asyncio.gather(*[_post_query(p) for p in payloads], return_exceptions=True)
+
+    if not any(isinstance(qr, list) and qr for qr in query_results) and status_errors:
+        if any(s in (401, 403) for s in status_errors):
+            raise ProviderError("Invalid or unauthorized Serper API key. Please check your SERPER_API_KEY in the sidebar.")
+        if any(s == 429 for s in status_errors):
+            raise ProviderError("Serper API rate limit exceeded or credit quota exhausted.")
+        raise ProviderError(f"Serper API request failed with status code {status_errors[0]}.")
 
     results: list[JobPosting] = []
     seen_links: set[str] = set()
@@ -353,11 +388,12 @@ async def _fetch_serper_search_jobs(
                 continue
 
             seen_links.add(link)
+            loc_hint = _extract_location_hint(raw_title, snippet, query)
             results.append(
                 JobPosting(
                     title=clean_title or raw_title,
                     company=company,
-                    location=query,
+                    location=loc_hint,
                     url=link,
                     apply_url=link,
                     description=snippet,
@@ -448,25 +484,36 @@ async def fetch_jobs(
         sub_queries = [raw_input]
 
     resolved_key = api_key or _get_serper_key()
+    if not resolved_key:
+        raise ProviderError(
+            "Serper API key not configured. Please enter your SERPER_API_KEY in the sidebar or .env file to search Google Jobs across open web companies."
+        )
 
     async with httpx.AsyncClient(timeout=_TIMEOUT, trust_env=False) as client:
         tasks = []
         for q in sub_queries:
-            if resolved_key:
-                tasks.append(_fetch_serper_search_jobs(q, resolved_key, client))
+            tasks.append(_fetch_serper_search_jobs(q, resolved_key, client))
             tasks.append(_fetch_arbeitnow_jobs(q, client))
 
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)
 
     combined_jobs: list[JobPosting] = []
     seen_urls: set[str] = set()
+    first_error: Exception | None = None
 
     for outcome in outcomes:
-        if isinstance(outcome, list):
-            for job in outcome:
-                if job.url not in seen_urls:
-                    seen_urls.add(job.url)
-                    combined_jobs.append(job)
+        if isinstance(outcome, Exception):
+            if first_error is None:
+                first_error = outcome
+            logger.warning("Google Jobs sub-fetch failed: %s", outcome)
+            continue
+        for job in outcome:
+            if job.url not in seen_urls:
+                seen_urls.add(job.url)
+                combined_jobs.append(job)
+
+    if not combined_jobs and first_error:
+        raise first_error
 
     logger.info("Open Web/Google Jobs: Total %d jobs retrieved across companies for '%s'.", len(combined_jobs), raw_input)
     return combined_jobs

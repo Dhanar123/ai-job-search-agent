@@ -373,10 +373,27 @@ with st.sidebar:
         st.info("🟢 **OpenAI Active**")
         selected_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     else:
-        st.warning("⚠️ No API Key in `.env`")
+        st.warning("⚠️ No AI API Key in `.env`")
         groq_input = st.text_input("Enter Groq API Key:", type="password")
         if groq_input:
             os.environ["GROQ_API_KEY"] = groq_input.strip()
+            st.rerun()
+
+    # Serper API Key (for Google Jobs open web search & GCT Alumni Search)
+    serper_val = _get_secret("SERPER_API_KEY")
+    if serper_val:
+        st.success("🌐 **Serper API Active (Google Jobs & Alumni)**")
+        with st.expander("Update Serper Key", expanded=False):
+            serper_new = st.text_input("Serper API Key:", value=serper_val, type="password", key="serper_key_edit")
+            if serper_new and serper_new.strip() != serper_val:
+                os.environ["SERPER_API_KEY"] = serper_new.strip()
+                st.rerun()
+    else:
+        st.warning("⚠️ **No Serper Key in `.env`**")
+        st.caption("Required for Google Jobs open web search & GCT Alumni finding. [Get free key at serper.dev](https://serper.dev).")
+        serper_input = st.text_input("Enter Serper API Key:", type="password", key="serper_key_init")
+        if serper_input:
+            os.environ["SERPER_API_KEY"] = serper_input.strip()
             st.rerun()
 
     st.markdown("---")
@@ -438,6 +455,8 @@ with st.sidebar:
         help="Search query for Google Jobs (e.g. 'Software Engineer India', 'Python Developer Coimbatore', 'Backend Engineer Remote')",
         disabled=not include_google_jobs,
     )
+    if include_google_jobs and not _get_secret("SERPER_API_KEY"):
+        st.caption("⚠️ *Serper API Key required. Enter your key in Section 1 above or set in `.env`.*")
 
     st.markdown("---")
     st.caption("**Specific ATS Boards (Optional):** Enter comma-separated tokens.")
@@ -674,6 +693,11 @@ with tab_criteria:
                     st.write(f"🎯 3. Filtered down to **{stats.get('filtered', 0)}** matching postings.")
                     st.write(f"📝 4. Extracted descriptions & evaluated **{stats.get('scored', 0)}** postings with {selected_model}.")
                     st.write(f"✅ 5. Validated links and live vacancy status: **{stats.get('active_matches', 0)}** active matching jobs ready!")
+
+                    if scan_errors:
+                        with st.expander("⚠️ Provider Diagnostic Warnings", expanded=(stats.get("discovered", 0) == 0)):
+                            for err in scan_errors:
+                                st.warning(f"**{err.get('provider')} [{err.get('identifier')}]:** {err.get('error')}")
 
                     status_box.update(label="🎉 Pipeline Complete! Check 'Matching Jobs' tab.", state="complete")
                     st.toast("Matching jobs ready in Tab 2!", icon="🎯")
@@ -926,7 +950,8 @@ with tab_results:
 
         # ── Provider Scan Diagnostic Errors ─────────────────────────
         if st.session_state.scan_errors:
-            with st.expander("⚠️ Provider Diagnostic Warnings", expanded=False):
+            should_expand_diag = stats.get("discovered", 0) == 0 or stats.get("filtered", 0) == 0
+            with st.expander("⚠️ Provider Diagnostic Warnings", expanded=should_expand_diag):
                 for err in st.session_state.scan_errors:
                     st.warning(f"**Provider {err.get('provider')} [{err.get('identifier')}]:** {err.get('error')}")
 
